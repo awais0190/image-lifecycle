@@ -1,0 +1,87 @@
+@import "tailwindcss";
+
+@theme inline {
+  /* ── Brand Palette ─────────────────────────────────────────── */
+  --color-navy-dark:      #0d1117;
+  --color-navy-surface:   #161b27;
+  --color-navy-elevated:  #1c2333;
+  --color-navy-border:    #30363d;
+
+  --color-emerald:        #1E8449;
+  --color-emerald-light:  #27ae60;
+  --color-emerald-dim:    #145a32;
+
+  --color-text-primary:   #e6edf3;
+  --color-text-secondary: #8b949e;
+  --color-text-muted:     #484f58;
+  --color-border:         #30363d;
+
+  --color-danger:         #f85149;
+  --color-warning:        #d29922;
+  --color-success:        #3fb950;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-inter);
+}
+
+:root {
+  --background: #0d1117;
+  --foreground: #e6edf3;
+  --card: #161b27;
+  --card-foreground: #e6edf3;
+  --border: #30363d;
+  --input: #21262d;
+  --ring: #1E8449;
+  --primary: #1E8449;
+  --primary-foreground: #ffffff;
+  --muted: #21262d;
+  --muted-foreground: #8b949e;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { color-scheme: dark; }
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans, Inter, system-ui, sans-serif);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Scrollbar ──────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #1E8449; }
+
+/* ── Reusable effects ────────────────────────────────────────── */
+.glass {
+  background: rgba(22, 27, 39, 0.85);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(48,54,61,0.8);
+}
+
+.emerald-glow {
+  box-shadow: 0 0 24px rgba(30,132,73,0.2), 0 0 8px rgba(30,132,73,0.1);
+}
+
+.card-surface {
+  background: #161b27;
+  border: 1px solid #30363d;
+  border-radius: 12px;
+}
+
+@keyframes pulse-border {
+  0%, 100% { border-color: rgba(30,132,73,0.5); box-shadow: 0 0 0 4px rgba(30,132,73,0.08); }
+  50%       { border-color: rgba(30,132,73,0.9); box-shadow: 0 0 0 4px rgba(30,132,73,0.18); }
+}
+.drag-active { animation: pulse-border 1.4s ease-in-out infinite; }
+
+/* dot-grid bg for canvas area */
+.dot-grid {
+  background-image: radial-gradient(circle, #30363d 1px, transparent 1px);
+  background-size: 22px 22px;
+}
