@@ -1,30 +1,24 @@
 /**
  * GET /api/images/tree/[hash]
  *
- * Returns the full provenance tree rooted at the given pHash.
- * "Root" means: walk up to the depth-0 ancestor, then collect
- * the entire subtree beneath it.
+ * Returns the full provenance TreeJSON rooted at the depth-0 ancestor
+ * of the requested pHash.
  *
- * Response shape:
- * {
- *   status: 'success',
- *   rootHash: string,
- *   nodes: TreeNode[],    // all nodes with x/y positions computed
- *   edges: { id, source, target }[]
- * }
- *
- * TODO Phase 03 — implement:
- *   1. Connect to MongoDB via connectDB()
- *   2. Find the requested node by hash
- *   3. Walk up parentHash chain to find depth-0 root
- *   4. BFS/DFS from root to collect all descendant nodes
- *   5. Call node.toTreeNode() on each document
- *   6. Run Dagre layout to assign x/y positions
- *   7. Build edges array from parentHash links
- *   8. Return full graph payload
+ * Pipeline:
+ *   1. Find the requested node
+ *   2. Walk up parentHash chain to find depth-0 root
+ *   3. BFS from root to collect all descendant nodes
+ *   4. Build and return TreeJSON + TreeStats
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { connectDB }                 from '@/lib/db/mongodb';
+import { ImageNodeModel }            from '@/lib/db/models/ImageNode';
+import { buildTreeJson, getTreeStats } from '@/lib/utils/treeBuilder';
+import type { ImageNode }            from '@/types/image';
+import type { IImageNode }           from '@/lib/db/models/ImageNode';
+import type { RelationshipGraph }    from '@/lib/services/relationshipEngine';
+import type { AnalyzedImage }        from '@/lib/services/batchAnalyzer';
 
 interface RouteParams {
   params: Promise<{ hash: string }>;
@@ -33,12 +27,93 @@ interface RouteParams {
 export async function GET(_request: NextRequest, { params }: RouteParams) {
   const { hash } = await params;
 
-  // TODO Phase 03: implement tree retrieval (see above)
-  return NextResponse.json(
-    {
-      status: 'error',
-      error:  `Tree retrieval not yet implemented. Requested hash: ${hash}`,
-    },
-    { status: 501 }
-  );
+  if (!hash?.trim()) {
+    return NextResponse.json({ error: 'Missing hash', code: 'MISSING_HASH' }, { status: 400 });
+  }
+
+  try {
+    await connectDB();
+
+    // Find requested node
+    const startNode = await ImageNodeModel.findOne({ hash: hash.trim() });
+    if (!startNode) {
+      return NextResponse.json({ error: `Node not found: ${hash}`, code: 'NOT_FOUND' }, { status: 404 });
+    }
+
+    // Walk up to root (depth 0)
+    let rootDoc = startNode;
+    while (rootDoc.parentHash) {
+      const parent = await ImageNodeModel.findOne({ hash: rootDoc.parentHash });
+      if (!parent) break;
+      rootDoc = parent;
+    }
+
+    // BFS from root to collect all descendants
+    const allDocs: IImageNode[] = [];
+    const queue: IImageNode[]   = [rootDoc];
+    const visited                = new Set<string>();
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      if (visited.has(current.hash)) continue;
+      visited.add(current.hash);
+      allDocs.push(current);
+
+      if (current.children?.length > 0) {
+        const childDocs = await ImageNodeModel.find({ hash: { $in: current.children } });
+        queue.push(...childDocs);
+      }
+    }
+
+    // Reconstruct a minimal RelationshipGraph from the DB data
+    const nodes = new Map<string, { pHash: string; image: AnalyzedImage; depth: number; parentHash: string | null }>();
+    const edges: RelationshipGraph['edges'] = [];
+
+    for (const doc of allDocs) {
+      nodes.set(doc.hash, {
+        pHash:      doc.hash,
+        image: {
+          url:             doc.cloudinaryUrl,
+          pHash:           doc.hash,
+          cryptoHash:      doc.cryptoHash,
+          metadata:        doc.metadata as unknown as AnalyzedImage['metadata'],
+          editingDetection: {
+            wasEdited:  (doc.forensics as unknown as { isEdited: boolean }).isEdited,
+            software:   (doc.forensics as unknown as { editingSoftware?: string }).editingSoftware ?? null,
+            confidence: (doc.forensics as unknown as { confidence: number }).confidence,
+          },
+          matchType:       'full',
+          pHashDistance:   0,
+          googleScore:     1,
+          platform:        ((doc.sources as { platform?: string }[])?.[0]?.platform) ?? 'Unknown',
+          downloadedAt:    new Date(doc.uploadedAt ?? Date.now()),
+          downloadSuccess: true,
+        },
+        depth:      doc.depth as unknown as number,
+        parentHash: doc.parentHash as string | null,
+      });
+
+      if (doc.parentHash) {
+        edges.push({ parentHash: doc.parentHash, childHash: doc.hash, confidence: 0.8 });
+      }
+    }
+
+    const graph: RelationshipGraph = {
+      nodes:            nodes as RelationshipGraph['nodes'],
+      edges,
+      rootHash:         rootDoc.hash,
+      totalDepth:       Math.max(0, ...[...nodes.values()].map((n) => n.depth)),
+      confidenceScores: new Map(edges.map((e) => [e.childHash, e.confidence])),
+      clipUsed:         false,
+    };
+
+    const allNodes: ImageNode[] = allDocs.map((d) => d.toObject() as unknown as ImageNode);
+    const tree  = buildTreeJson(graph, allNodes);
+    const stats = getTreeStats(tree);
+
+    return NextResponse.json({ status: 'success', rootHash: rootDoc.hash, tree, stats });
+  } catch (error) {
+    console.error('[/api/images/tree] error:', error);
+    return NextResponse.json({ error: 'Internal server error', code: 'INTERNAL_ERROR' }, { status: 500 });
+  }
 }

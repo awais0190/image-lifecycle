@@ -1,81 +1,87 @@
 'use client';
 
 /**
- * MetadataTable — STUB
- *
- * TODO Phase 02:
- *   1. Receive ImageMetadata object as prop
- *   2. Render a two-column table: field name / value
- *   3. Highlight suspicious values (missing GPS, future dates, zeroed fields)
- *   4. Add copy-to-clipboard for raw EXIF JSON
- *   5. Collapsible GPS section with mini map embed (Phase 04)
+ * MetadataTable — Phase 02
+ * Dark two-column table with alternating row shading, Framer Motion stagger,
+ * optional monospace font, and muted placeholder for null values.
  */
 
-import type { ImageMetadata } from '@/types/image';
-import { cn } from '@/lib/utils/cn';
+import { motion } from 'framer-motion';
+import { MapPin }  from 'lucide-react';
+import { cn }      from '@/lib/utils/cn';
+
+export interface MetadataRow {
+  label: string;
+  value: string | null | undefined;
+  /** 'pin' renders a MapPin icon before the value */
+  icon?: 'pin';
+  /** Render value in monospace font */
+  mono?: boolean;
+}
 
 interface MetadataTableProps {
-  metadata?: ImageMetadata | null;
+  rows: MetadataRow[];
   className?: string;
 }
 
-export default function MetadataTable({ metadata, className }: MetadataTableProps) {
-  if (!metadata) {
-    return (
-      <div
-        className={cn('rounded-xl p-4', className)}
-        style={{ background: '#16213e', border: '1px solid #2d3748' }}
-      >
-        <p className="text-xs" style={{ color: '#8892a4' }}>
-          No metadata available.
-        </p>
-      </div>
-    );
-  }
+const container = {
+  hidden: {},
+  show:   { transition: { staggerChildren: 0.04 } },
+};
 
-  const rows: { label: string; value: string | undefined }[] = [
-    { label: 'Dimensions', value: `${metadata.width} × ${metadata.height}` },
-    { label: 'Format',     value: metadata.format },
-    { label: 'File Size',  value: `${(metadata.fileSize / 1024).toFixed(1)} KB` },
-    { label: 'Created',    value: metadata.dateCreated },
-    { label: 'Camera',     value: metadata.camera },
-    { label: 'Software',   value: metadata.software },
-    { label: 'GPS',        value: metadata.gps
-        ? `${metadata.gps.lat.toFixed(5)}, ${metadata.gps.lng.toFixed(5)}`
-        : undefined },
-  ];
+const rowVariants = {
+  hidden: { opacity: 0, x: -6 },
+  show:   { opacity: 1, x: 0, transition: { duration: 0.2 } },
+};
 
+export default function MetadataTable({ rows, className }: MetadataTableProps) {
   return (
     <div
-      className={cn('w-full rounded-xl overflow-hidden', className)}
-      style={{ background: '#16213e', border: '1px solid #2d3748' }}
+      className={cn('w-full overflow-hidden rounded-lg', className)}
+      style={{ border: '1px solid #30363d' }}
     >
-      <div className="px-4 py-3" style={{ borderBottom: '1px solid #2d3748' }}>
-        <h3 className="text-xs font-semibold uppercase tracking-wider" style={{ color: '#8892a4' }}>
-          EXIF Metadata
-        </h3>
-      </div>
-
-      <table className="w-full text-xs">
+      <motion.table
+        className="w-full text-xs"
+        variants={container}
+        initial="hidden"
+        animate="show"
+      >
         <tbody>
-          {rows.map(({ label, value }) =>
-            value ? (
-              <tr
-                key={label}
-                className="border-b last:border-0"
-                style={{ borderColor: '#2d3748' }}
+          {rows.map(({ label, value, icon, mono }, i) => (
+            <motion.tr
+              key={label}
+              variants={rowVariants}
+              className="border-b last:border-0"
+              style={{
+                borderColor: '#30363d',
+                background:  i % 2 === 0 ? '#1c2333' : '#161b27',
+              }}
+            >
+              <td
+                className="py-2 pl-3 pr-2 font-medium"
+                style={{ color: '#8b949e', width: '38%', whiteSpace: 'nowrap' }}
               >
-                <td className="py-2 pl-4 pr-2 font-medium" style={{ color: '#8892a4', width: '40%' }}>
-                  {label}
-                </td>
-                <td className="py-2 pl-2 pr-4" style={{ color: '#ffffff' }}>
-                  {value}
-                </td>
-              </tr>
-            ) : null
-          )}
+                {label}
+              </td>
+              <td className="py-2 pl-2 pr-3">
+                {value ? (
+                  <span
+                    className={cn('flex items-center gap-1', mono && 'font-mono')}
+                    style={{ color: '#e6edf3' }}
+                  >
+                    {icon === 'pin' && (
+                      <MapPin size={10} style={{ color: '#3fb950', flexShrink: 0 }} />
+                    )}
+                    {value}
+                  </span>
+                ) : (
+                  <span style={{ color: '#484f58' }}>Not available</span>
+                )}
+              </td>
+            </motion.tr>
+          ))}
         </tbody>
-      </table>
+      </motion.table>
     </div>
   );
 }

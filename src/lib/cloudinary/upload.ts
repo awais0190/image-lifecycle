@@ -23,8 +23,9 @@ export interface UploadOptions {
    * SHA-256 hex of the raw file bytes.
    * Used to build a deterministic public_id so the same image is never
    * uploaded twice (Cloudinary deduplication at folder level).
+   * Optional — if omitted a random ID is generated.
    */
-  sha256Hash: string;
+  sha256Hash?: string;
   /** Optional subfolder inside CLOUDINARY_FOLDER, e.g. "ela-heatmaps" */
   subfolder?: string;
   /** Cloudinary transformation tags */
@@ -44,11 +45,12 @@ export async function uploadImage(
 ): Promise<UploadResult> {
   const { sha256Hash, subfolder, tags = [] } = options;
 
-  // Deterministic public_id prevents re-uploading identical files
+  // Deterministic public_id prevents re-uploading identical files (fallback to timestamp+random)
+  const id        = sha256Hash ?? `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   const folder    = subfolder
     ? `${CLOUDINARY_FOLDER}/${subfolder}`
     : CLOUDINARY_FOLDER;
-  const publicId  = `${folder}/${sha256Hash}`;
+  const publicId  = `${folder}/${id}`;
 
   return new Promise((resolve, reject) => {
     const uploadStream = cloudinary.uploader.upload_stream(
@@ -59,7 +61,7 @@ export async function uploadImage(
         use_filename:     false,
         unique_filename:  false,
         tags:             ['image-lifecycle', ...tags],
-        context:          { sha256: sha256Hash },
+        context:          sha256Hash ? { sha256: sha256Hash } : undefined,
       },
       (error, result) => {
         if (error || !result) {

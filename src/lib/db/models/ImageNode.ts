@@ -38,6 +38,16 @@ const MetadataSchema = new Schema(
   { _id: false }
 );
 
+// Phase 04: sub-document for a single edit signal
+const EditSignalSchema = new Schema(
+  {
+    score:  { type: Number, required: true },
+    weight: { type: Number, required: true },
+    reason: { type: String, required: true },
+  },
+  { _id: false }
+);
+
 const ForensicsSchema = new Schema(
   {
     isEdited:        { type: Boolean, required: true, default: false },
@@ -45,6 +55,20 @@ const ForensicsSchema = new Schema(
     elaScore:        { type: Number, required: true, default: 0 },
     elaHeatmapUrl:   { type: String },
     confidence:      { type: Number, required: true, default: 0 },
+    // Phase 04 additions
+    editProbability: { type: Number, default: null },
+    editVerdict:     { type: String, enum: ['original', 'edited', 'uncertain', null], default: null },
+    signals: {
+      type: new Schema(
+        {
+          exif: { type: EditSignalSchema },
+          ela:  { type: EditSignalSchema },
+          clip: { type: EditSignalSchema, default: null },
+        },
+        { _id: false }
+      ),
+      default: null,
+    },
   },
   { _id: false }
 );

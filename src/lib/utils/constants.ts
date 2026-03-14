@@ -52,12 +52,32 @@ export const ACCEPTED_IMAGE_TYPES = [
   'image/gif',
 ] as const;
 
+/** ELA score thresholds for edit detection */
+export const ELA_THRESHOLDS = {
+  /** elaScore > this → isLikelyEdited = true */
+  LIKELY_EDITED:   0.15,
+  /** elaScore > this → possibly edited */
+  POSSIBLY_EDITED: 0.05,
+} as const;
+
+/** Edit probability verdicts */
+export const EDIT_PROBABILITY_THRESHOLDS = {
+  /** editProbability >= this → verdict 'edited' */
+  EDITED:    0.65,
+  /** editProbability >= this → verdict 'uncertain', else 'original' */
+  UNCERTAIN: 0.35,
+} as const;
+
 /** Cloudinary upload folder */
 export const CLOUDINARY_FOLDER = 'image-lifecycle';
 
+/** Cloudinary subfolder for ELA heatmap images */
+export const ELA_CLOUDINARY_SUBFOLDER = 'ela-heatmaps';
+
 /** API base paths */
 export const API_PATHS = {
-  ANALYZE:  '/api/images/analyze',
-  TREE:     '/api/images/tree',
-  NODE:     '/api/images/node',
+  ANALYZE:     '/api/images/analyze',
+  TREE:        '/api/images/tree',
+  NODE:        '/api/images/node',
+  HEALTH_CLIP: '/api/health/clip',
 } as const;

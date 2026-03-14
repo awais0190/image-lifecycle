@@ -2,13 +2,15 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { ScanSearch, LayoutDashboard, Clock, Info } from 'lucide-react';
+import { ScanSearch, LayoutDashboard, GitCompareArrows, Layers, Clock, Info } from 'lucide-react';
 import { cn } from '@/lib/utils/cn';
 
 const NAV_LINKS = [
-  { href: '/',        label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/history', label: 'History',   icon: Clock },
-  { href: '/about',   label: 'About',     icon: Info },
+  { href: '/analyze', label: 'Analyzer', icon: LayoutDashboard },
+  { href: '/compare', label: 'Compare',  icon: GitCompareArrows },
+  { href: '/batch',   label: 'Batch',    icon: Layers },
+  { href: '/history', label: 'History',  icon: Clock },
+  { href: '/about',   label: 'About',    icon: Info },
 ] as const;
 
 export default function Navbar() {
@@ -53,7 +55,7 @@ export default function Navbar() {
             className="h-1.5 w-1.5 rounded-full"
             style={{ background: '#3fb950', boxShadow: '0 0 6px #3fb950' }}
           />
-          <span className="text-xs" style={{ color: '#8b949e' }}>Phase 01</span>
+          <span className="text-xs" style={{ color: '#8b949e' }}>Phase 05</span>
         </div>
 
         {/* ── Nav links ─────────────────────────────────────── */}
