@@ -224,10 +224,13 @@ export async function POST(request: NextRequest) {
       platform:        'Uploaded',
       downloadedAt:    new Date(),
       downloadSuccess: true,
-      clipEmbedding:   clipEmbedding,
+      clipEmbedding:          clipEmbedding,
       dHash,
-      elaScore:        elaResult.elaScore,
-      elaHeatmapUrl:   elaResult.elaHeatmapUrl,
+      elaScore:               elaResult.elaScore,
+      elaHeatmapUrl:          elaResult.elaHeatmapUrl,
+      isPartialOfRoot:        false,  // root is never a crop of itself
+      partialMatchConfidence: 0,
+      partialMatchWhich:      null,
     };
 
     // ── Step 10: Google Vision reverse search ──────────────────────────────
@@ -243,7 +246,7 @@ export async function POST(request: NextRequest) {
 
     // ── Step 11: Batch analyze discovered images ───────────────────────────
     const analyzedImages = visionResults.length > 0
-      ? await analyzeDiscoveredImages(visionResults, pHash)
+      ? await analyzeDiscoveredImages(visionResults, pHash, buffer)
       : [];
 
     // ── Step 12: Upsert discovered ImageNodes ─────────────────────────────

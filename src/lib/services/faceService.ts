@@ -14,6 +14,12 @@ const ARCFACE_THRESHOLD = 0.68;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+export interface PartialMatchResult {
+  isPartial:  boolean;
+  confidence: number;
+  which:      'B_in_A' | 'A_in_B' | null; // which image is inside the other
+}
+
 export interface FaceDetectResult {
   faceDetected: boolean;
   faceCount:    number;
@@ -120,6 +126,40 @@ export const faceService = {
       };
     } catch (err) {
       console.error('[faceService] compareFaces error:', err);
+      return null;
+    }
+  },
+
+  /**
+   * Detect if one image is a cropped sub-region of the other.
+   * Uses multi-scale template matching on the Python service.
+   * Returns null if the ML service is unreachable.
+   */
+  async detectPartialMatch(bufferA: Buffer, bufferB: Buffer): Promise<PartialMatchResult | null> {
+    try {
+      const form = new FormData();
+      form.append('img1', toBlob(bufferA), 'a.jpg');
+      form.append('img2', toBlob(bufferB), 'b.jpg');
+
+      const res = await fetch(`${ML_SERVICE_URL}/image/partial-match`, {
+        method: 'POST',
+        body:   form,
+        signal: AbortSignal.timeout(20_000),
+      });
+
+      if (!res.ok) {
+        console.error('[faceService] detectPartialMatch non-ok:', res.status, await res.text().catch(() => ''));
+        return null;
+      }
+
+      const data = await res.json() as { is_partial: boolean; confidence: number; which: string | null };
+      return {
+        isPartial:  data.is_partial,
+        confidence: data.confidence,
+        which:      data.which as PartialMatchResult['which'],
+      };
+    } catch (err) {
+      console.error('[faceService] detectPartialMatch error:', err);
       return null;
     }
   },

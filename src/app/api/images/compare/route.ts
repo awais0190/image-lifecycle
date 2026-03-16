@@ -148,9 +148,10 @@ export async function POST(request: NextRequest) {
     if (!valA.valid) return NextResponse.json({ error: `Image A: ${valA.error}`, code: 'INVALID_IMAGE_A' }, { status: 422 });
     if (!valB.valid) return NextResponse.json({ error: `Image B: ${valB.error}`, code: 'INVALID_IMAGE_B' }, { status: 422 });
 
-    const [[resultA, resultB], faceResult] = await Promise.all([
+    const [[resultA, resultB], faceResult, partialResult] = await Promise.all([
       Promise.all([analyseImage(bufferA), analyseImage(bufferB)]),
       faceService.compareFaces(bufferA, bufferB),
+      faceService.detectPartialMatch(bufferA, bufferB),
     ]);
 
     const pHashDist   = hammingDistance(resultA.fingerprints.pHash, resultB.fingerprints.pHash);
@@ -175,6 +176,28 @@ export async function POST(request: NextRequest) {
         confidence  = Math.min(confidence, 0.70);
         description = 'Different people detected by face recognition — visually similar setting only.';
       }
+    }
+
+    // Partial/crop detection: if one image is a spatial sub-region of the other,
+    // upgrade "different" → "related" and "related" → "same_image".
+    // pHash changes completely on a crop so the base verdict is usually wrong.
+    if (partialResult?.isPartial) {
+      const cropLabel = partialResult.which === 'B_in_A'
+        ? 'Image B is a cropped region of Image A.'
+        : partialResult.which === 'A_in_B'
+          ? 'Image A is a cropped region of Image B.'
+          : 'One image is a cropped region of the other.';
+
+      if (verdict === 'different') {
+        verdict     = 'related';
+        confidence  = Math.max(confidence, partialResult.confidence * 0.85);
+        description = `${cropLabel} Partial copy or derived crop detected.`;
+      } else if (verdict === 'related') {
+        verdict     = 'same_image';
+        confidence  = Math.max(confidence, partialResult.confidence * 0.90);
+        description = `${cropLabel} Same image, partial region extracted.`;
+      }
+      // If already same_image/identical, leave it — the partial match only confirms it
     }
 
     const buildImagePayload = (r: Awaited<ReturnType<typeof analyseImage>>) => ({
@@ -224,6 +247,11 @@ export async function POST(request: NextRequest) {
           verified:      faceResult.verified,
           distance:      faceResult.distance,
           faceDetected:  faceResult.faceDetected,
+        } : null,
+        partialMatch: partialResult ? {
+          isPartial:  partialResult.isPartial,
+          confidence: partialResult.confidence,
+          which:      partialResult.which,
         } : null,
       },
     });

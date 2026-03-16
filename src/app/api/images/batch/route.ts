@@ -420,21 +420,32 @@ export async function POST(request: NextRequest) {
     // Build parent/child tree (cluster-aware root selection) — outliers excluded
     const { edges: rawEdges, rootId, avgSimilarities } = buildTree(nodesForTree);
 
-    // Augment MST edges with face comparison — run sequentially, one at a time,
-    // to avoid firing concurrent DeepFace requests that crash the ML service.
+    // Augment MST edges with face comparison + crop detection — run sequentially,
+    // one at a time, to avoid firing concurrent DeepFace requests that crash the ML service.
     const edges: BatchEdge[] = [];
     for (const edge of rawEdges) {
       const bufA = buffers[parseInt(edge.parentId)];
       const bufB = buffers[parseInt(edge.childId)];
+
+      // Face comparison (sequential — DeepFace can't handle concurrent requests)
       const faceCompare = await faceService.compareFaces(bufA, bufB);
 
-      // Downgrade relationship type when faces are detected but don't match —
-      // same logic as in /compare: different people can't be near-duplicates.
+      // Partial/crop detection (fast OpenCV, doesn't affect face model)
+      const partialMatch = await faceService.detectPartialMatch(bufA, bufB);
+
+      // Downgrade relationship type when faces are detected but don't match
       let { relationshipType } = edge;
       if (faceCompare?.faceDetected && faceCompare.matchLevel === 'no_match') {
         if      (relationshipType === 'near-duplicate') relationshipType = 'similar';
         else if (relationshipType === 'similar')        relationshipType = 'related';
         else if (relationshipType === 'related')        relationshipType = 'different';
+      }
+
+      // Upgrade relationship type when a spatial crop is detected —
+      // pHash changes completely on a crop so the MST edge may be under-scored.
+      if (partialMatch?.isPartial) {
+        if      (relationshipType === 'different') relationshipType = 'related';
+        else if (relationshipType === 'related')   relationshipType = 'similar';
       }
 
       edges.push({

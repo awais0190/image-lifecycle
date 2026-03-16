@@ -11,7 +11,7 @@ import { motion, AnimatePresence }       from 'framer-motion';
 import {
   UploadCloud, X, AlertCircle, CheckCircle2,
   GitCompareArrows, Cpu, ScanLine, FileImage,
-  ShieldCheck, ShieldAlert, AlertTriangle, ArrowRight, UserCheck,
+  ShieldCheck, ShieldAlert, AlertTriangle, ArrowRight, UserCheck, Scissors,
 } from 'lucide-react';
 import { cn } from '@/lib/utils/cn';
 import { MAX_UPLOAD_SIZE_BYTES, ACCEPTED_IMAGE_TYPES } from '@/lib/utils/constants';
@@ -61,6 +61,11 @@ interface CompareResult {
       verified:     boolean;
       distance:     number;
       faceDetected: boolean;
+    } | null;
+    partialMatch: {
+      isPartial:  boolean;
+      confidence: number;
+      which:      'B_in_A' | 'A_in_B' | null;
     } | null;
   };
   processingTime: number;
@@ -657,6 +662,21 @@ export default function ComparePage() {
                     : result.comparison.face.matchLevel === 'same_person' ? '#3fb950'
                     : result.comparison.face.matchLevel === 'likely_same' ? '#d29922'
                     : '#f85149'
+                  }
+                />
+                <MetricPill
+                  icon={<Scissors size={14} />}
+                  label="Crop"
+                  value={
+                    result.comparison.partialMatch === null ? 'N/A'
+                    : result.comparison.partialMatch.isPartial
+                      ? result.comparison.partialMatch.which === 'B_in_A' ? 'B⊂A'
+                      : result.comparison.partialMatch.which === 'A_in_B' ? 'A⊂B'
+                      : 'Yes'
+                    : 'No'
+                  }
+                  color={
+                    result.comparison.partialMatch?.isPartial ? '#d29922' : '#484f58'
                   }
                 />
               </div>
