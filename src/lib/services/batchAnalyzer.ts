@@ -10,6 +10,7 @@ import { extractExifData }                           from '@/lib/utils/exifExtra
 import { performELA }                                from '@/lib/utils/elaAnalysis';
 import { hammingDistance }                           from '@/lib/utils/duplicateDetector';
 import { faceService }                               from '@/lib/services/faceService';
+import { analyzeVisualEdits }                        from '@/lib/utils/visualEditAnalysis';
 import type { WebSearchResult, ImageMetadata }       from '@/types/image';
 import type { EditingDetection }                     from '@/lib/utils/exifExtractor';
 
@@ -35,6 +36,10 @@ export interface AnalyzedImage {
   isPartialOfRoot:        boolean;
   partialMatchConfidence: number;
   partialMatchWhich:      'B_in_A' | 'A_in_B' | null; // B_in_A = discovered is crop of root
+  // Visual + CLIP zero-shot edit analysis
+  visualEditScore:        number;
+  visualEditReasons:      string[];
+  clipEditProbability:    number;    // CLIP zero-shot editing probability (0–1)
 }
 
 // ─── Concurrency helper ───────────────────────────────────────────────────────
@@ -88,7 +93,6 @@ export async function analyzeDiscoveredImages(
     }
 
     // Fingerprint + EXIF + ELA + crop detection — all concurrent
-    // (template matching via OpenCV has no concurrency issues unlike DeepFace)
     const [fps, exif, ela, partialMatch] = await Promise.all([
       generateFingerprints(buffer),
       extractExifData(buffer),
@@ -99,6 +103,12 @@ export async function analyzeDiscoveredImages(
       rootBuffer
         ? faceService.detectPartialMatch(rootBuffer, buffer).catch(() => null)
         : Promise.resolve(null),
+    ]);
+
+    // Visual analysis + CLIP editing classification (after EXIF so we have dimensions)
+    const [visualResult, clipEditResult] = await Promise.all([
+      analyzeVisualEdits(buffer, exif.width, exif.height, exif.fileSize).catch(() => null),
+      faceService.classifyEditing(buffer).catch(() => null),
     ]);
 
     const pHashDist = hammingDistance(fps.pHash, rootPHash);
@@ -131,6 +141,9 @@ export async function analyzeDiscoveredImages(
       isPartialOfRoot:        partialMatch?.isPartial   ?? false,
       partialMatchConfidence: partialMatch?.confidence  ?? 0,
       partialMatchWhich:      partialMatch?.which       ?? null,
+      visualEditScore:        visualResult?.editScore      ?? 0,
+      visualEditReasons:      visualResult?.reasons        ?? [],
+      clipEditProbability:    clipEditResult?.editProbability ?? 0,
     };
 
     console.log(

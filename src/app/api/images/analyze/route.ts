@@ -37,6 +37,8 @@ import { extractExifData }                     from '@/lib/utils/exifExtractor';
 import { checkForDuplicates }                  from '@/lib/utils/duplicateDetector';
 import { performELA }                          from '@/lib/utils/elaAnalysis';
 import { assessEditProbability }               from '@/lib/utils/editDetector';
+import { analyzeVisualEdits }                  from '@/lib/utils/visualEditAnalysis';
+import { faceService }                         from '@/lib/services/faceService';
 import { reverseImageSearch }                  from '@/lib/services/googleVision';
 import { analyzeDiscoveredImages }             from '@/lib/services/batchAnalyzer';
 import { buildRelationships }                  from '@/lib/services/relationshipEngine';
@@ -137,10 +139,14 @@ export async function POST(request: NextRequest) {
     });
     console.log(`[Phase04] ELA: score=${elaResult.elaScore.toFixed(4)}, likelyEdited=${elaResult.isLikelyEdited}`);
 
-    // ── Step 6.6: Combined edit assessment ────────────────────────────────
+    // ── Step 6.6: Combined edit assessment (ELA + EXIF + visual + CLIP zero-shot)
     console.log('[Phase04] Step 6.6: Running edit assessment…');
-    const editAssessment = assessEditProbability(exifData, elaResult, null);
-    console.log(`[Phase04] Verdict: ${editAssessment.verdict} (${(editAssessment.editProbability * 100).toFixed(0)}% edit probability)`);
+    const [visualResult, clipEditResult] = await Promise.all([
+      analyzeVisualEdits(buffer, exifData.width, exifData.height, exifData.fileSize),
+      faceService.classifyEditing(buffer).catch(() => null),
+    ]);
+    const editAssessment = assessEditProbability(exifData, elaResult, null, null, visualResult, clipEditResult);
+    console.log(`[Phase04] Verdict: ${editAssessment.verdict} (${(editAssessment.editProbability * 100).toFixed(0)}% edit prob | CLIP-edit: ${clipEditResult ? (clipEditResult.editProbability * 100).toFixed(0) + '%' : 'offline'})`);
 
     // ── Step 8: Determine parent hash + depth ─────────────────────────────
     let parentHash: string | null = null;
@@ -231,6 +237,9 @@ export async function POST(request: NextRequest) {
       isPartialOfRoot:        false,  // root is never a crop of itself
       partialMatchConfidence: 0,
       partialMatchWhich:      null,
+      visualEditScore:        visualResult.editScore,
+      visualEditReasons:      visualResult.reasons,
+      clipEditProbability:    clipEditResult?.editProbability ?? 0,
     };
 
     // ── Step 10: Google Vision reverse search ──────────────────────────────
@@ -332,7 +341,18 @@ export async function POST(request: NextRequest) {
         editingDetection: img.editingDetection,
       };
 
-      const assessment = assessEditProbability(imgMeta, imgElaResult, clipSim, img.pHashDistance);
+      const imgVisual = img.visualEditScore > 0 ? {
+        hasUniformBorders: false, hasTextRegions: img.visualEditScore > 0.2,
+        textCoverage: 0, compressionRatio: 0, isSocialMediaFormat: false,
+        aspectCategory: 'unknown', noiseInconsistency: 0,
+        editScore: img.visualEditScore, reasons: img.visualEditReasons,
+      } : null;
+      const imgClipEdit = img.clipEditProbability > 0 ? {
+        editProbability: img.clipEditProbability,
+        topIndicators:   [],
+        isEdited:        img.clipEditProbability >= 0.55,
+      } : null;
+      const assessment = assessEditProbability(imgMeta, imgElaResult, clipSim, img.pHashDistance, imgVisual, imgClipEdit);
       // Attach to the img object so step 12 can use it
       (img as AnalyzedImage & { _assessment?: typeof assessment })._assessment = assessment;
 

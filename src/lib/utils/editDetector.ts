@@ -1,20 +1,24 @@
 /**
  * editDetector.ts — Phase 05
- * Combines four signals into a single edit-probability assessment:
+ * Combines five signals into a single edit-probability assessment:
  *
- *   Signal 1 — EXIF software    (weight 0.28): known editor → high probability
- *   Signal 2 — ELA score        (weight 0.37): pixel artefacts → high probability
- *   Signal 3 — CLIP vs parent   (weight 0.22, optional): semantic distance
- *   Signal 4 — pHash structural (weight 0.13, optional): same content + pixel diff
+ *   Signal 1 — EXIF software        (weight 0.15): known editor → high probability
+ *   Signal 2 — ELA score            (weight 0.18): pixel artefacts → high probability
+ *   Signal 3 — CLIP vs parent       (weight 0.12, optional): semantic distance
+ *   Signal 4 — pHash structural     (weight 0.08, optional): same content + pixel diff
+ *   Signal 5 — Pixel visual analysis(weight 0.12, optional): borders, compression
+ *   Signal 6 — CLIP zero-shot edit  (weight 0.35, optional): ML editing classification
  *
- * Signals 3 and 4 are skipped when data is unavailable; weight is redistributed.
- * Signal 4 fires when pHash distance ≥ 8 AND CLIP similarity ≥ 0.75, catching
- * text overlays / watermarks that ELA misses on clean re-saves.
+ * Signal 6 (CLIP zero-shot) dominates when available — it's a real ML model that
+ * understands "photo with text overlay" vs "original photograph".
+ * All optional signals are skipped when unavailable; weights redistribute.
  */
 
 import { EDIT_PROBABILITY_THRESHOLDS, ELA_THRESHOLDS } from '@/lib/utils/constants';
 import type { ExtractedMetadata } from '@/lib/utils/exifExtractor';
 import type { ELAResult, EditAssessment, EditSignal } from '@/types/image';
+import type { VisualAnalysisResult }   from '@/lib/utils/visualEditAnalysis';
+import type { EditingClassifyResult }   from '@/lib/services/faceService';
 
 // ─── Signal scoring helpers ───────────────────────────────────────────────────
 
@@ -23,8 +27,8 @@ function scoreExif(meta: ExtractedMetadata): EditSignal {
 
   if (editingDetection.wasEdited) {
     return {
-      score:  0.9,
-      weight: 0.28,
+      score:  0.92,
+      weight: 0.22,
       reason: editingDetection.software
         ? `${editingDetection.software} detected in EXIF metadata`
         : 'Editing software detected in EXIF metadata',
@@ -33,17 +37,18 @@ function scoreExif(meta: ExtractedMetadata): EditSignal {
 
   if (meta.camera) {
     return {
-      score:  0.1,
-      weight: 0.28,
+      score:  0.08,
+      weight: 0.22,
       reason: `Camera EXIF present (${meta.camera}), no editing software`,
     };
   }
 
-  // No EXIF at all — unknown provenance
+  // No EXIF at all — previously 0.5 (too generous for stripped social media images)
+  // Strip EXIF is itself a mild editing indicator; treat as slightly suspicious
   return {
-    score:  0.5,
-    weight: 0.28,
-    reason: 'No EXIF metadata — provenance unknown',
+    score:  0.42,
+    weight: 0.22,
+    reason: 'No EXIF metadata — common in social-media or processed images',
   };
 }
 
@@ -68,7 +73,36 @@ function scoreEla(ela: ELAResult): EditSignal {
     reason = `ELA score ${ela.elaScore.toFixed(3)} — consistent with unmodified image`;
   }
 
-  return { score, weight: 0.37, reason };
+  return { score, weight: 0.28, reason };
+}
+
+function scoreVisual(visual: VisualAnalysisResult): EditSignal {
+  const topReasons = visual.reasons.slice(0, 2).join('; ') || 'No visual edit indicators found';
+  return {
+    score:  visual.editScore,
+    weight: 0.12,   // supplementary — pixel heuristics, lower weight than CLIP
+    reason: topReasons,
+  };
+}
+
+/**
+ * Signal 6 — CLIP zero-shot editing classification.
+ *
+ * CLIP compares the image against 15 "edited" prompts and 3 "original" prompts.
+ * This is far more reliable than ELA or pixel heuristics because CLIP actually
+ * understands "a photo with text overlay" vs "an original photograph".
+ * Weight is highest (0.35) because it's a real ML model.
+ */
+function scoreClipEditing(result: EditingClassifyResult): EditSignal {
+  const topLabel = result.topIndicators[0] ?? 'editing indicators detected';
+  const reason   = result.isEdited
+    ? `CLIP editing classifier: ${(result.editProbability * 100).toFixed(0)}% edit probability — "${topLabel}"`
+    : `CLIP editing classifier: ${(result.editProbability * 100).toFixed(0)}% — consistent with original photograph`;
+  return {
+    score:  result.editProbability,
+    weight: 0.35,
+    reason,
+  };
 }
 
 function scoreClip(clipSimilarityToParent: number): EditSignal {
@@ -119,28 +153,33 @@ function scoreStructural(
 // ─── Main function ────────────────────────────────────────────────────────────
 
 /**
- * Combine EXIF, ELA, and optionally CLIP + structural signals into a single
- * edit assessment.
+ * Combine EXIF, ELA, optional CLIP + structural, and optional visual signals
+ * into a single edit assessment.
  *
- * @param exifResult            - EXIF metadata + editing-software detection
- * @param elaResult             - ELA compression-artifact analysis
+ * @param exifResult             - EXIF metadata + editing-software detection
+ * @param elaResult              - ELA compression-artifact analysis
  * @param clipSimilarityToParent - CLIP cosine similarity to parent image, or null
  * @param pHashDistFromParent    - Hamming distance from parent pHash, or null
+ * @param visualResult           - Visual pixel-level analysis result, or null
  */
 export function assessEditProbability(
   exifResult:              ExtractedMetadata,
   elaResult:               ELAResult,
   clipSimilarityToParent:  number | null,
-  pHashDistFromParent:     number | null = null
+  pHashDistFromParent:     number | null = null,
+  visualResult:            VisualAnalysisResult | null = null,
+  clipEditResult:          EditingClassifyResult | null = null,
 ): EditAssessment {
-  const exifSignal       = scoreExif(exifResult);
-  const elaSignal        = scoreEla(elaResult);
-  const clipSignal       = clipSimilarityToParent !== null
+  const exifSignal        = scoreExif(exifResult);
+  const elaSignal         = scoreEla(elaResult);
+  const clipSignal        = clipSimilarityToParent !== null
     ? scoreClip(clipSimilarityToParent)
     : null;
-  const structuralSignal = scoreStructural(pHashDistFromParent ?? 0, clipSimilarityToParent);
+  const structuralSignal  = scoreStructural(pHashDistFromParent ?? 0, clipSimilarityToParent);
+  const visualSignal      = visualResult   !== null ? scoreVisual(visualResult)     : null;
+  const clipEditSignal    = clipEditResult !== null ? scoreClipEditing(clipEditResult) : null;
 
-  // ── Weighted sum ───────────────────────────────────────────────────────
+  // ── Weighted sum — CLIP zero-shot is dominant when available ───────────
   let totalWeight = exifSignal.weight + elaSignal.weight;
   let weightedSum = exifSignal.score * exifSignal.weight
                   + elaSignal.score  * elaSignal.weight;
@@ -152,6 +191,14 @@ export function assessEditProbability(
   if (structuralSignal) {
     totalWeight += structuralSignal.weight;
     weightedSum += structuralSignal.score * structuralSignal.weight;
+  }
+  if (visualSignal) {
+    totalWeight += visualSignal.weight;
+    weightedSum += visualSignal.score * visualSignal.weight;
+  }
+  if (clipEditSignal) {
+    totalWeight += clipEditSignal.weight;
+    weightedSum += clipEditSignal.score * clipEditSignal.weight;
   }
 
   const editProbability = Math.min(1, Math.max(0, weightedSum / totalWeight));
@@ -181,9 +228,10 @@ export function assessEditProbability(
       uncertain: EDIT_PROBABILITY_THRESHOLDS.UNCERTAIN,
     },
     signals: {
-      exif: exifSignal,
-      ela:  elaSignal,
-      clip: clipSignal ?? structuralSignal,   // show structural as clip slot if no real clip
+      exif:   exifSignal,
+      ela:    elaSignal,
+      clip:   clipEditSignal ?? clipSignal ?? structuralSignal ?? null,  // CLIP edit takes priority in UI
+      visual: visualSignal ?? null,
     },
     overallConfidence,
   };

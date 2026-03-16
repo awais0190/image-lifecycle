@@ -14,10 +14,11 @@ import { generateFingerprints }       from '@/lib/utils/fingerprint';
 import { extractExifData }            from '@/lib/utils/exifExtractor';
 import { performELA }                 from '@/lib/utils/elaAnalysis';
 import { assessEditProbability }      from '@/lib/utils/editDetector';
+import { analyzeVisualEdits }         from '@/lib/utils/visualEditAnalysis';
+import { faceService }                from '@/lib/services/faceService';
 import { uploadImage }                from '@/lib/cloudinary/upload';
 import { hammingDistance }            from '@/lib/utils/duplicateDetector';
 import { cosineSimilarity }           from '@/lib/services/clipService';
-import { faceService }                from '@/lib/services/faceService';
 
 export const maxDuration = 90;
 
@@ -99,14 +100,18 @@ async function analyseImage(buffer: Buffer) {
     uploadImage(buffer, {}),
   ]);
 
-  const elaResult = await performELA(buffer).catch(() => ({
-    elaScore: 0, elaHeatmapUrl: '', elaHeatmapPublicId: '',
-    isLikelyEdited: false, confidence: 0, highDiffRegions: 0, analysisTime: 0,
-  }));
+  const [elaResult, visualResult, clipEditResult] = await Promise.all([
+    performELA(buffer).catch(() => ({
+      elaScore: 0, elaHeatmapUrl: '', elaHeatmapPublicId: '',
+      isLikelyEdited: false, confidence: 0, highDiffRegions: 0, analysisTime: 0,
+    })),
+    analyzeVisualEdits(buffer, exifData.width, exifData.height, exifData.fileSize),
+    faceService.classifyEditing(buffer).catch(() => null),
+  ]);
 
-  const assessment = assessEditProbability(exifData, elaResult, null);
+  const assessment = assessEditProbability(exifData, elaResult, null, null, visualResult, clipEditResult);
 
-  return { fingerprints, exifData, uploadResult, elaResult, assessment };
+  return { fingerprints, exifData, uploadResult, elaResult, assessment, visualResult };
 }
 
 // ─── Route handler ─────────────────────────────────────────────────────────────

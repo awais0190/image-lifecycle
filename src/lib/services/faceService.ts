@@ -14,6 +14,12 @@ const ARCFACE_THRESHOLD = 0.68;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+export interface EditingClassifyResult {
+  editProbability: number;    // 0–1 from CLIP zero-shot
+  topIndicators:   string[];  // top matched editing prompts
+  isEdited:        boolean;   // editProbability >= 0.55
+}
+
 export interface PartialMatchResult {
   isPartial:  boolean;
   confidence: number;
@@ -126,6 +132,40 @@ export const faceService = {
       };
     } catch (err) {
       console.error('[faceService] compareFaces error:', err);
+      return null;
+    }
+  },
+
+  /**
+   * Zero-shot CLIP classification: is this image edited/manipulated?
+   * Returns null if the ML service is unreachable.
+   */
+  async classifyEditing(buffer: Buffer): Promise<EditingClassifyResult | null> {
+    try {
+      const form = new FormData();
+      form.append('file', toBlob(buffer), 'image.jpg');
+
+      const res = await fetch(`${ML_SERVICE_URL}/classify/editing`, {
+        method: 'POST',
+        body:   form,
+        signal: AbortSignal.timeout(20_000),
+      });
+
+      if (!res.ok) {
+        console.error('[faceService] classifyEditing non-ok:', res.status, await res.text().catch(() => ''));
+        return null;
+      }
+
+      const data = await res.json() as {
+        edit_probability: number; top_indicators: string[]; is_edited: boolean;
+      };
+      return {
+        editProbability: data.edit_probability,
+        topIndicators:   data.top_indicators,
+        isEdited:        data.is_edited,
+      };
+    } catch (err) {
+      console.error('[faceService] classifyEditing error:', err);
       return null;
     }
   },

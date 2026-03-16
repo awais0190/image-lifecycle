@@ -34,9 +34,10 @@ export interface EditAssessment {
   verdict: 'original' | 'edited' | 'uncertain';
   verdictThresholds: { edited: number; uncertain: number };
   signals: {
-    exif: EditSignal;
-    ela:  EditSignal;
-    clip: EditSignal | null;
+    exif:   EditSignal;
+    ela:    EditSignal;
+    clip:   EditSignal | null;
+    visual: EditSignal | null;
   };
   overallConfidence: number; // 0–1
 }
@@ -63,10 +64,40 @@ export interface ForensicsResult {
   editProbability?: number;               // 0–1 combined signal
   editVerdict?:     'original' | 'edited' | 'uncertain';
   signals?: {
-    exif?: EditSignal;
-    ela?:  EditSignal;
-    clip?: EditSignal | null;
+    exif?:   EditSignal;
+    ela?:    EditSignal;
+    clip?:   EditSignal | null;
+    visual?: EditSignal | null;
   };
+  // Phase 05 advanced edit report (colour + object diff)
+  editReport?: {
+    overall: {
+      is_edited:  boolean;
+      confidence: number;
+      edit_types: string[];
+      severity:   'none' | 'minor' | 'moderate' | 'major';
+      summary:    string;
+    };
+    color?: {
+      color_changed:    boolean;
+      confidence:       number;
+      change_type:      string;
+      change_intensity: number;
+      details?: {
+        hue_shift:           number;
+        saturation_change:   number;
+        brightness_change:   number;
+        affected_percentage: number;
+      };
+    };
+    objects?: {
+      objects_changed:     boolean;
+      total_changed_area:  number;
+      change_intensity:    number;
+      diff_heatmap_base64: string | null;
+      regions?: { type: string; area_percentage: number }[];
+    };
+  } | null;
 }
 
 /** Source reference: where this image was found on the web */
