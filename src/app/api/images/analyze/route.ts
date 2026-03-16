@@ -41,6 +41,7 @@ import { reverseImageSearch }                  from '@/lib/services/googleVision
 import { analyzeDiscoveredImages }             from '@/lib/services/batchAnalyzer';
 import { buildRelationships }                  from '@/lib/services/relationshipEngine';
 import { buildTreeJson, getTreeStats, singleNodeTree } from '@/lib/utils/treeBuilder';
+import { cosineSimilarity }                          from '@/lib/services/clipService';
 import type { IImageNode }                     from '@/lib/db/models/ImageNode';
 import type { AnalyzedImage }                  from '@/lib/services/batchAnalyzer';
 import type { ImageNode, ImageSource }         from '@/types/image';
@@ -92,7 +93,7 @@ export async function POST(request: NextRequest) {
 
     // ── Step 3: Fingerprints (SHA-256 + pHash + CLIP) ─────────────────────
     console.log('[Phase04] Step 3: Generating fingerprints…');
-    const { cryptoHash, pHash, clipEmbedding, clipServiceAvailable } =
+    const { cryptoHash, pHash, dHash, clipEmbedding, clipServiceAvailable } =
       await generateFingerprints(buffer);
 
     // ── Step 4: EXIF ───────────────────────────────────────────────────────
@@ -165,6 +166,7 @@ export async function POST(request: NextRequest) {
     const nodeData = {
       hash:               pHash,
       cryptoHash,
+      dHash,
       clipEmbedding:      clipEmbedding ?? [],
       cloudinaryUrl:      uploadResult.url,
       cloudinaryPublicId: uploadResult.publicId,
@@ -222,6 +224,10 @@ export async function POST(request: NextRequest) {
       platform:        'Uploaded',
       downloadedAt:    new Date(),
       downloadSuccess: true,
+      clipEmbedding:   clipEmbedding,
+      dHash,
+      elaScore:        elaResult.elaScore,
+      elaHeatmapUrl:   elaResult.elaHeatmapUrl,
     };
 
     // ── Step 10: Google Vision reverse search ──────────────────────────────
@@ -257,18 +263,28 @@ export async function POST(request: NextRequest) {
           );
           discoveredMongoNodes.push(existing);
         } else {
+          const imgAssessment = (img as AnalyzedImage & { _assessment?: ReturnType<typeof assessEditProbability> })._assessment;
           const newNode = await ImageNodeModel.create({
             hash:               img.pHash,
             cryptoHash:         img.cryptoHash,
-            clipEmbedding:      [],
+            clipEmbedding:      img.clipEmbedding ?? [],
+            dHash:              img.dHash,
             cloudinaryUrl:      img.url,
             cloudinaryPublicId: img.cryptoHash.slice(0, 32),
             metadata:           img.metadata,
             forensics: {
-              isEdited:        img.editingDetection.wasEdited,
+              isEdited:        imgAssessment ? imgAssessment.verdict !== 'original' : img.editingDetection.wasEdited,
               editingSoftware: img.editingDetection.software ?? undefined,
-              elaScore:        0,
-              confidence:      img.editingDetection.confidence,
+              elaScore:        img.elaScore,
+              elaHeatmapUrl:   img.elaHeatmapUrl || undefined,
+              confidence:      imgAssessment?.overallConfidence ?? img.editingDetection.confidence,
+              editProbability: imgAssessment?.editProbability,
+              editVerdict:     imgAssessment?.verdict,
+              signals:         imgAssessment ? {
+                exif: imgAssessment.signals.exif,
+                ela:  imgAssessment.signals.ela,
+                clip: imgAssessment.signals.clip,
+              } : undefined,
             },
             sources: [{
               url: img.url, foundAt: img.downloadedAt.toISOString(), platform: img.platform,
@@ -282,10 +298,53 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // ── Step 12.5: Full edit assessment for each discovered image ──────────
+    console.log('[Phase04] Step 12.5: Running full edit assessment for discovered images…');
+
+    for (const img of analyzedImages) {
+      const imgClip  = img.clipEmbedding;
+      const clipSim  = clipEmbedding && imgClip
+        ? cosineSimilarity(clipEmbedding, imgClip)
+        : null;
+
+      const imgElaResult = {
+        elaScore:           img.elaScore,
+        elaHeatmapUrl:      img.elaHeatmapUrl,
+        elaHeatmapPublicId: '',
+        isLikelyEdited:     img.elaScore > 0.15,
+        confidence:         img.elaScore > 0.15 ? 0.85 : 0.75,
+        highDiffRegions:    0,
+        analysisTime:       0,
+      };
+
+      const imgMeta = {
+        width:            img.metadata.width,
+        height:           img.metadata.height,
+        format:           img.metadata.format,
+        fileSize:         img.metadata.fileSize,
+        dateCreated:      img.metadata.dateCreated,
+        camera:           img.metadata.camera,
+        software:         img.metadata.software,
+        gps:              img.metadata.gps,
+        editingDetection: img.editingDetection,
+      };
+
+      const assessment = assessEditProbability(imgMeta, imgElaResult, clipSim, img.pHashDistance);
+      // Attach to the img object so step 12 can use it
+      (img as AnalyzedImage & { _assessment?: typeof assessment })._assessment = assessment;
+
+      console.log(
+        `[Phase04] Discovered ${img.pHash.slice(0, 12)}… verdict=${assessment.verdict} (${(assessment.editProbability * 100).toFixed(0)}%) ELA=${img.elaScore.toFixed(3)} CLIP_sim=${clipSim?.toFixed(3) ?? 'n/a'} pHashDist=${img.pHashDistance}`
+      );
+    }
+
     // ── Step 13: Build relationship graph with CLIP map ───────────────────
     console.log('[Phase04] Step 13: Building relationship graph…');
     const clipMap = new Map<string, number[]>();
     if (clipEmbedding) clipMap.set(pHash, clipEmbedding);
+    for (const img of analyzedImages) {
+      if (img.clipEmbedding) clipMap.set(img.pHash, img.clipEmbedding);
+    }
 
     const graph = buildRelationships(rootAnalyzed, analyzedImages, clipMap);
 
@@ -336,6 +395,11 @@ export async function POST(request: NextRequest) {
       discoveredCount:    analyzedImages.length,
       visionSearchFailed,
       visionError:        visionSearchFailed ? visionErrorMessage : undefined,
+      unrelatedImages:    graph.unrelated.map((img) => ({
+        url:           img.url,
+        platform:      img.platform,
+        pHashDistance: img.pHashDistance,
+      })),
     });
 
   } catch (error: unknown) {

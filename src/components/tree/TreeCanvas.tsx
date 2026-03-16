@@ -1,10 +1,10 @@
 'use client';
 
 /**
- * TreeCanvas — Phase 05
+ * TreeCanvas — 
  * React Flow provenance tree with dagre layout.
  *
- * Phase 05 additions:
+ *  additions:
  *  - selectedNodeHash prop → passes `selected` to ImageNodeCard
  *  - key={rootHash} on ReactFlowProvider → forces full re-render when tree changes
  *  - fitViewOnInit + fitView after data arrival

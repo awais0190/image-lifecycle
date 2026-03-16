@@ -11,7 +11,7 @@ import { motion, AnimatePresence }       from 'framer-motion';
 import {
   UploadCloud, X, AlertCircle, CheckCircle2,
   GitCompareArrows, Cpu, ScanLine, FileImage,
-  ShieldCheck, ShieldAlert, AlertTriangle, ArrowRight,
+  ShieldCheck, ShieldAlert, AlertTriangle, ArrowRight, UserCheck,
 } from 'lucide-react';
 import { cn } from '@/lib/utils/cn';
 import { MAX_UPLOAD_SIZE_BYTES, ACCEPTED_IMAGE_TYPES } from '@/lib/utils/constants';
@@ -49,11 +49,19 @@ interface CompareResult {
   imageB:     ImagePayload;
   comparison: {
     pHashDistance:   number;
+    dHashDistance:   number;
     clipSimilarity:  number | null;
     cryptoHashMatch: boolean;
     verdict:         string;
     confidence:      number;
     description:     string;
+    face: {
+      matchLevel:   'same_person' | 'likely_same' | 'no_match';
+      confidence:   number;
+      verified:     boolean;
+      distance:     number;
+      faceDetected: boolean;
+    } | null;
   };
   processingTime: number;
 }
@@ -62,10 +70,10 @@ interface CompareResult {
 
 function verdictStyle(verdict: string) {
   switch (verdict) {
-    case 'identical': return { color: '#3fb950', bg: 'rgba(63,185,80,0.08)',   border: '#3fb95033', label: 'Identical' };
-    case 'similar':   return { color: '#3fb950', bg: 'rgba(63,185,80,0.06)',   border: '#3fb95022', label: 'Very Similar' };
-    case 'related':   return { color: '#d29922', bg: 'rgba(210,153,34,0.08)', border: '#d2992233', label: 'Related' };
-    default:          return { color: '#f85149', bg: 'rgba(248,81,73,0.08)',   border: '#f8514933', label: 'Different' };
+    case 'identical':  return { color: '#3fb950', bg: 'rgba(63,185,80,0.10)',  border: '#3fb95044', label: 'Identical' };
+    case 'same_image': return { color: '#3fb950', bg: 'rgba(63,185,80,0.06)',  border: '#3fb95022', label: 'Same Image (Modified)' };
+    case 'related':    return { color: '#d29922', bg: 'rgba(210,153,34,0.08)', border: '#d2992233', label: 'Related' };
+    default:           return { color: '#f85149', bg: 'rgba(248,81,73,0.08)',  border: '#f8514933', label: 'Different' };
   }
 }
 
@@ -595,14 +603,14 @@ export default function ComparePage() {
               </motion.div>
 
               {/* ── Metrics row ────────────────────────────────────────────── */}
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
                 <MetricPill
                   icon={<ScanLine size={14} />}
-                  label="pHash Distance"
-                  value={String(result.comparison.pHashDistance)}
+                  label="dHash Dist"
+                  value={String(result.comparison.dHashDistance)}
                   color={
-                    result.comparison.pHashDistance <= 10 ? '#3fb950'
-                    : result.comparison.pHashDistance <= 20 ? '#d29922'
+                    result.comparison.dHashDistance <= 10 ? '#3fb950'
+                    : result.comparison.dHashDistance <= 20 ? '#d29922'
                     : '#f85149'
                   }
                 />
@@ -632,6 +640,24 @@ export default function ComparePage() {
                   label="ELA B"
                   value={result.imageB.ela.score.toFixed(3)}
                   color={elaColor(result.imageB.ela.score)}
+                />
+                <MetricPill
+                  icon={<UserCheck size={14} />}
+                  label="Face Match"
+                  value={
+                    result.comparison.face === null ? 'N/A'
+                    : !result.comparison.face.faceDetected ? 'No Face'
+                    : result.comparison.face.matchLevel === 'same_person' ? 'Same'
+                    : result.comparison.face.matchLevel === 'likely_same' ? 'Likely'
+                    : 'Diff'
+                  }
+                  color={
+                    result.comparison.face === null ? '#484f58'
+                    : !result.comparison.face.faceDetected ? '#484f58'
+                    : result.comparison.face.matchLevel === 'same_person' ? '#3fb950'
+                    : result.comparison.face.matchLevel === 'likely_same' ? '#d29922'
+                    : '#f85149'
+                  }
                 />
               </div>
 

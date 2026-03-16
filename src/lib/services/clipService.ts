@@ -180,16 +180,8 @@ export const clipServiceClient = {
 
     if (!serviceUrl) return localFallback();
 
-    try {
-      const formData = new FormData();
-      // Send query as a pre-computed embedding via a small placeholder image is
-      // impractical — use the /compare endpoint approach via local fallback instead,
-      // as the Python /analyze endpoint requires an actual image file for embedding.
-      // We already have the query embedding, so local cosine is the right path here.
-      return localFallback();
-    } catch {
-      return localFallback();
-    }
+    // We already have the query embedding so local cosine is the right path here.
+    return localFallback();
   },
 
   /**
@@ -207,8 +199,8 @@ export const clipServiceClient = {
         8_000   // short timeout for health checks
       );
       if (!res.ok) return false;
-      const body = await res.json() as { model_loaded?: boolean };
-      return body.model_loaded === true;
+      const body = await res.json() as { clip_loaded?: boolean };
+      return body.clip_loaded === true;
     } catch {
       return false;
     }

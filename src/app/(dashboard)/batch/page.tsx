@@ -19,7 +19,7 @@ import dagre from 'dagre';
 import {
   Layers, UploadCloud, X, AlertCircle, ScanLine,
   ShieldCheck, ShieldAlert, AlertTriangle, Crown,
-  ChevronDown, ChevronUp, GitBranch,
+  ChevronDown, ChevronUp, GitBranch, UserCheck,
 } from 'lucide-react';
 import { cn } from '@/lib/utils/cn';
 import { MAX_UPLOAD_SIZE_BYTES, ACCEPTED_IMAGE_TYPES } from '@/lib/utils/constants';
@@ -32,6 +32,7 @@ interface BatchResult {
   processingTime: number;
   rootId:         string;
   nodes:          Omit<BatchNode, 'clipEmbedding'>[];
+  outlierNodes:   Omit<BatchNode, 'clipEmbedding'>[];
   edges:          BatchEdge[];
   matrix:         Array<{ a: string; b: string; pHashDistance: number; clipSimilarity: number | null }>;
 }
@@ -80,7 +81,7 @@ function relColor(type: BatchEdge['relationshipType']) {
 // ─── Dagre layout ──────────────────────────────────────────────────────────────
 
 const NODE_W = 160;
-const NODE_H = 130;
+const NODE_H = 145;
 
 function layoutGraph(nodes: RFNode[], edges: RFEdge[]) {
   const g = new dagre.graphlib.Graph();
@@ -181,6 +182,12 @@ function BatchTreeNode({ data }: { data: {
             {Math.round(node.assessment.editProbability * 100)}%
           </span>
         </div>
+        <div className="flex items-center justify-between text-[10px]">
+          <span style={{ color: '#484f58' }}>Face</span>
+          <span className="font-mono" style={{ color: node.faceDetected ? '#58a6ff' : '#484f58' }}>
+            {node.faceDetected ? `${node.faceCount} found` : 'none'}
+          </span>
+        </div>
       </div>
     </div>
 
@@ -215,9 +222,10 @@ function InnerFlow({
     const rfEdges: RFEdge[] = result.edges.map((e) => {
       const col      = relColor(e.relationshipType);
       const clipPct  = e.clipSimilarity !== null ? `CLIP ${(e.clipSimilarity * 100).toFixed(0)}%` : null;
-      const label    = clipPct
-        ? `${clipPct} · Δ${e.pHashDistance}`
-        : `Δ${e.pHashDistance}`;
+      const faceLabel = e.faceMatch?.matchLevel === 'same_person' ? 'Same face'
+                      : e.faceMatch?.matchLevel === 'likely_same' ? 'Likely same'
+                      : null;
+      const label    = [clipPct, faceLabel, `Δ${e.pHashDistance}`].filter(Boolean).join(' · ');
       const animated = e.relationshipType === 'identical' || e.relationshipType === 'near-duplicate';
       return {
         id:             e.id,
@@ -359,6 +367,25 @@ function DetailPanel({
               {node.ela.highDiffRegions}
             </p>
           </div>
+        </div>
+      </div>
+
+      {/* face detection */}
+      <div>
+        <p className="mb-2 text-xs font-semibold" style={{ color: '#484f58' }}>Face Detection</p>
+        <div
+          className="flex items-center gap-2 rounded-xl px-3 py-2"
+          style={{
+            background: node.faceDetected ? 'rgba(88,166,255,0.08)' : '#1c2333',
+            border:     node.faceDetected ? '1px solid rgba(88,166,255,0.3)' : '1px solid #30363d',
+          }}
+        >
+          <UserCheck size={13} style={{ color: node.faceDetected ? '#58a6ff' : '#484f58' }} />
+          <p className="text-xs" style={{ color: node.faceDetected ? '#58a6ff' : '#484f58' }}>
+            {node.faceDetected
+              ? `${node.faceCount} face${node.faceCount !== 1 ? 's' : ''} detected`
+              : 'No face detected'}
+          </p>
         </div>
       </div>
 
@@ -738,7 +765,8 @@ export default function BatchPage() {
                 style={{ background: '#161b27', border: '1px solid #30363d' }}
               >
                 {[
-                  { label: 'Images',     value: String(result.nodes.length),  color: '#e6edf3' },
+                  { label: 'In Tree',    value: String(result.nodes.length),  color: '#e6edf3' },
+                  { label: 'Unrelated',  value: String(result.outlierNodes?.length ?? 0), color: (result.outlierNodes?.length ?? 0) > 0 ? '#f85149' : '#484f58' },
                   { label: 'Edges',      value: String(result.edges.length),  color: '#3fb950' },
                   { label: 'Root',       value: result.nodes.find((n) => n.id === result.rootId)?.filename.split('.')[0] ?? '—', color: '#3fb950' },
                   { label: 'Processed',  value: `${(result.processingTime / 1000).toFixed(1)}s`, color: '#484f58' },
@@ -806,7 +834,51 @@ export default function BatchPage() {
               </div>
 
               {/* Similarity matrix (collapsible) */}
-              <SimilarityMatrix nodes={result.nodes} matrix={result.matrix} />
+              <SimilarityMatrix nodes={[...result.nodes, ...(result.outlierNodes ?? [])]} matrix={result.matrix} />
+
+              {/* Unrelated images — excluded from provenance tree */}
+              {(result.outlierNodes?.length ?? 0) > 0 && (
+                <div
+                  className="rounded-2xl p-4 space-y-3"
+                  style={{ background: '#161b27', border: '1px solid rgba(248,81,73,0.3)' }}
+                >
+                  <div className="flex items-center gap-2">
+                    <AlertCircle size={14} style={{ color: '#f85149' }} />
+                    <p className="text-sm font-semibold" style={{ color: '#f85149' }}>
+                      Unrelated Images ({result.outlierNodes!.length})
+                    </p>
+                    <p className="text-xs" style={{ color: '#484f58' }}>
+                      — too dissimilar to include in the provenance tree
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                    {result.outlierNodes!.map((node) => (
+                      <div
+                        key={node.id}
+                        className="overflow-hidden rounded-xl"
+                        style={{ background: '#0d1117', border: '1px solid #30363d' }}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={node.cloudinaryUrl}
+                          alt=""
+                          className="w-full object-cover"
+                          style={{ height: 100 }}
+                          onError={(e) => { (e.target as HTMLImageElement).style.opacity = '0'; }}
+                        />
+                        <div className="px-2 py-1.5 space-y-0.5">
+                          <p className="truncate text-[10px] font-medium" style={{ color: '#8b949e' }}>
+                            {node.filename.length > 20 ? node.filename.slice(0, 18) + '…' : node.filename}
+                          </p>
+                          <p className="text-[10px]" style={{ color: '#484f58' }}>
+                            {node.metadata.width}×{node.metadata.height} · {node.metadata.format?.toUpperCase()}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
             </motion.div>
           )}

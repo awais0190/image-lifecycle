@@ -11,7 +11,7 @@ import { motion, AnimatePresence }       from 'framer-motion';
 import {
   UploadCloud, X, AlertCircle, FileImage, ScanLine,
   ShieldCheck, ShieldAlert, AlertTriangle, Microscope,
-  Hash, Calendar, Camera, Monitor, MapPin, Info, ChevronDown, ChevronUp,
+  Hash, Calendar, Camera, Monitor, MapPin, Info, ChevronDown, ChevronUp, UserCheck,
 } from 'lucide-react';
 import { cn } from '@/lib/utils/cn';
 import { MAX_UPLOAD_SIZE_BYTES, ACCEPTED_IMAGE_TYPES } from '@/lib/utils/constants';
@@ -57,6 +57,7 @@ interface ForensicsResult {
       clip: { score: number; weight: number; reason: string } | null;
     };
   };
+  face: { faceDetected: boolean; faceCount: number; confidence: number } | null;
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -717,6 +718,46 @@ export default function ForensicsPage() {
                   )}
                 </div>
               </Section>
+
+              {/* ── Face Detection section ─────────────────────────────────── */}
+              {result.face && (
+                <Section title="Face Detection" icon={<UserCheck size={15} />} collapsible defaultOpen>
+                  <div className="pt-2">
+                    <div
+                      className="flex items-center gap-3 rounded-xl px-4 py-3"
+                      style={{
+                        background: result.face.faceDetected ? 'rgba(88,166,255,0.08)' : '#1c2333',
+                        border:     result.face.faceDetected ? '1px solid rgba(88,166,255,0.3)' : '1px solid #30363d',
+                      }}
+                    >
+                      <UserCheck size={22} style={{ color: result.face.faceDetected ? '#58a6ff' : '#484f58' }} />
+                      <div className="flex-1">
+                        <p className="text-sm font-bold" style={{ color: result.face.faceDetected ? '#58a6ff' : '#484f58' }}>
+                          {result.face.faceDetected
+                            ? `${result.face.faceCount} face${result.face.faceCount !== 1 ? 's' : ''} detected`
+                            : 'No face detected'}
+                        </p>
+                        {result.face.faceDetected && (
+                          <p className="text-xs mt-0.5" style={{ color: '#8b949e' }}>
+                            Detection confidence: {Math.round(result.face.confidence * 100)}%
+                          </p>
+                        )}
+                      </div>
+                      {result.face.faceDetected && (
+                        <div
+                          className="rounded-xl px-3 py-1.5 text-center"
+                          style={{ background: 'rgba(88,166,255,0.1)', border: '1px solid rgba(88,166,255,0.2)' }}
+                        >
+                          <p className="text-xl font-bold font-mono" style={{ color: '#58a6ff' }}>
+                            {Math.round(result.face.confidence * 100)}%
+                          </p>
+                          <p className="text-xs" style={{ color: '#484f58' }}>confidence</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </Section>
+              )}
 
               {/* ── Fingerprints section ───────────────────────────────────── */}
               <Section title="Image Fingerprints" icon={<Hash size={15} />} collapsible defaultOpen={false}>

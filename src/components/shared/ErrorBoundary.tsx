@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * ErrorBoundary — Phase 05
+ * ErrorBoundary — 
  * Class-based React error boundary for wrapping UI sections.
  * Shows a friendly fallback card instead of a white-screen crash.
  */

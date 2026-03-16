@@ -86,8 +86,9 @@ const SourceSchema = new Schema(
 
 export interface IImageNode extends Document {
   // Fingerprints
-  hash:              string;   // perceptual hash (pHash)
+  hash:              string;   // perceptual hash (pHash) — primary key, backwards compat
   cryptoHash:        string;   // SHA-256
+  dHash?:            string;   // difference hash (Phase 05)
 
   // Embedding (Phase 02)
   clipEmbedding:     number[];
@@ -137,7 +138,10 @@ const ImageNodeSchema = new Schema<IImageNode, IImageNodeModel>(
     clipEmbedding: {
       type:    [Number],
       default: [],
-      // Phase 02: populated by CLIP microservice
+    },
+    dHash: {
+      type:  String,
+      index: true,
     },
     cloudinaryUrl: {
       type:     String,

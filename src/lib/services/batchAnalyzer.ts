@@ -1,12 +1,13 @@
 /**
  * Batch image analyzer.
- * Downloads and fingerprints discovered images in parallel (max 5 concurrent).
- * Failures are logged and skipped — never crash the pipeline.
+ * Downloads, fingerprints, runs ELA, and extracts EXIF for each discovered URL.
+ * Processes max 5 at a time. Failures are logged and skipped.
  */
 
 import { downloadImageFromUrl, validateImageBuffer } from '@/lib/utils/imageIngestion';
 import { generateFingerprints }                      from '@/lib/utils/fingerprint';
 import { extractExifData }                           from '@/lib/utils/exifExtractor';
+import { performELA }                                from '@/lib/utils/elaAnalysis';
 import { hammingDistance }                           from '@/lib/utils/duplicateDetector';
 import type { WebSearchResult, ImageMetadata }       from '@/types/image';
 import type { EditingDetection }                     from '@/lib/utils/exifExtractor';
@@ -25,6 +26,10 @@ export interface AnalyzedImage {
   platform: string;
   downloadedAt: Date;
   downloadSuccess: boolean;
+  clipEmbedding:  number[] | null;
+  dHash:          string;
+  elaScore:       number;
+  elaHeatmapUrl:  string;
 }
 
 // ─── Concurrency helper ───────────────────────────────────────────────────────
@@ -46,7 +51,7 @@ async function processInBatches<T, R>(
 // ─── Main function ────────────────────────────────────────────────────────────
 
 /**
- * Download, validate, fingerprint, and extract EXIF for each discovered URL.
+ * Download, validate, fingerprint, run ELA, and extract EXIF for each discovered URL.
  * Processes max 5 at a time. Returns only results that could be analyzed.
  */
 export async function analyzeDiscoveredImages(
@@ -75,14 +80,15 @@ export async function analyzeDiscoveredImages(
       throw new Error(validation.error);
     }
 
-    // Fingerprint + EXIF (parallel)
-    const [fps, exif] = await Promise.all([
+    // Fingerprint + EXIF + ELA in parallel
+    const [fps, exif, ela] = await Promise.all([
       generateFingerprints(buffer),
       extractExifData(buffer),
+      performELA(buffer).catch(() => ({
+        elaScore: 0, elaHeatmapUrl: '', elaHeatmapPublicId: '',
+        isLikelyEdited: false, confidence: 0, highDiffRegions: 0, analysisTime: 0,
+      })),
     ]);
-
-    // Drop buffer explicitly (let GC reclaim it)
-    (buffer as unknown as null);
 
     const pHashDist = hammingDistance(fps.pHash, rootPHash);
 
@@ -107,10 +113,14 @@ export async function analyzeDiscoveredImages(
       platform:         result.platform ?? 'Unknown',
       downloadedAt:     new Date(),
       downloadSuccess:  true,
+      clipEmbedding:    fps.clipEmbedding,
+      dHash:            fps.dHash,
+      elaScore:         ela.elaScore,
+      elaHeatmapUrl:    ela.elaHeatmapUrl,
     };
 
     console.log(
-      `[BatchAnalyzer] ✓ Done ${label} — pHash dist: ${pHashDist}, platform: ${analyzed.platform}`
+      `[BatchAnalyzer] ✓ Done ${label} — pHashDist: ${pHashDist}, ELA: ${ela.elaScore.toFixed(4)}, CLIP: ${fps.clipEmbedding ? '512d' : 'null'}, platform: ${analyzed.platform}`
     );
     return analyzed;
   });

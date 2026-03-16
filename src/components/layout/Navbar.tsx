@@ -9,7 +9,7 @@ const NAV_LINKS = [
   { href: '/analyze', label: 'Analyzer', icon: LayoutDashboard },
   { href: '/compare', label: 'Compare',  icon: GitCompareArrows },
   { href: '/batch',   label: 'Batch',    icon: Layers },
-  { href: '/history', label: 'History',  icon: Clock },
+  // { href: '/history', label: 'History',  icon: Clock },
   { href: '/about',   label: 'About',    icon: Info },
 ] as const;
 

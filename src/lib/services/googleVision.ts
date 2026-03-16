@@ -11,7 +11,7 @@ import type { WebSearchResult } from '@/types/image';
 // ─── REST API types (subset we use) ──────────────────────────────────────────
 
 interface VisionImageRef  { url: string; score?: number }
-interface VisionPageRef   { url: string; pageTitle?: string; fullMatchingImages?: VisionImageRef[] }
+interface VisionPageRef   { url: string; pageTitle?: string; fullMatchingImages?: VisionImageRef[]; partialMatchingImages?: VisionImageRef[] }
 
 interface VisionWebDetection {
   webEntities?:             { entityId: string; score: number; description: string }[];
@@ -29,7 +29,7 @@ interface VisionResponse {
 }
 
 const VISION_API = 'https://vision.googleapis.com/v1/images:annotate';
-const MAX_RESULTS = 20; // ask for more, then trim after filtering
+const MAX_RESULTS = 50; // ask for more, then trim after filtering
 
 // ─── Platform detection ───────────────────────────────────────────────────────
 
@@ -67,15 +67,30 @@ export function detectPlatform(url: string): string {
 /**
  * Build a page-URL index from Vision's pagesWithMatchingImages so we can
  * annotate each image URL with the page it appeared on.
+ * Also returns all embedded image URLs from within those pages.
  */
-function buildPageIndex(pages: VisionPageRef[] = []): Map<string, string> {
-  const index = new Map<string, string>();
+function buildPageIndex(pages: VisionPageRef[] = []): {
+  index: Map<string, string>;
+  embeddedFull:    VisionImageRef[];
+  embeddedPartial: VisionImageRef[];
+} {
+  const index          = new Map<string, string>();
+  const embeddedFull:    VisionImageRef[] = [];
+  const embeddedPartial: VisionImageRef[] = [];
+
   for (const page of pages) {
     for (const img of page.fullMatchingImages ?? []) {
       index.set(img.url, page.url);
+      // Score embedded page images slightly lower than top-level matches
+      embeddedFull.push({ url: img.url, score: (img.score ?? 0.7) * 0.9 });
+    }
+    for (const img of page.partialMatchingImages ?? []) {
+      index.set(img.url, page.url);
+      embeddedPartial.push({ url: img.url, score: (img.score ?? 0.5) * 0.9 });
     }
   }
-  return index;
+
+  return { index, embeddedFull, embeddedPartial };
 }
 
 /**
@@ -124,7 +139,7 @@ export async function reverseImageSearch(imageUrl: string): Promise<WebSearchRes
     return [];
   }
 
-  const pageIndex = buildPageIndex(detection.pagesWithMatchingImages);
+  const { index: pageIndex, embeddedFull, embeddedPartial } = buildPageIndex(detection.pagesWithMatchingImages);
   const results: WebSearchResult[] = [];
   const seenUrls = new Set<string>([imageUrl]); // exclude the uploaded image itself
 
@@ -148,6 +163,9 @@ export async function reverseImageSearch(imageUrl: string): Promise<WebSearchRes
   pushResults(detection.fullMatchingImages,    'full');
   pushResults(detection.partialMatchingImages, 'partial');
   pushResults(detection.visuallySimilarImages, 'similar');
+  // Also include images embedded within page results (new additional sources)
+  pushResults(embeddedFull,    'full');
+  pushResults(embeddedPartial, 'partial');
 
   // Sort by score descending, cap at maxDiscoveredImages
   const trimmed = results

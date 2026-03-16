@@ -16,6 +16,7 @@ import { extractExifData }            from '@/lib/utils/exifExtractor';
 import { performELA }                 from '@/lib/utils/elaAnalysis';
 import { assessEditProbability }      from '@/lib/utils/editDetector';
 import { uploadImage }                from '@/lib/cloudinary/upload';
+import { faceService }                from '@/lib/services/faceService';
 
 export const maxDuration = 60;
 
@@ -54,10 +55,11 @@ export async function POST(request: NextRequest) {
     }
 
     // ── Run all analyses in parallel where possible ────────────────────────
-    const [fingerprints, exifData, uploadResult] = await Promise.all([
+    const [fingerprints, exifData, uploadResult, faceResult] = await Promise.all([
       generateFingerprints(buffer),
       extractExifData(buffer),
       uploadImage(buffer, {}),
+      faceService.detectFace(buffer),
     ]);
 
     const elaResult = await performELA(buffer).catch(() => ({
@@ -102,6 +104,11 @@ export async function POST(request: NextRequest) {
         overallConfidence: assessment.overallConfidence,
         signals:         assessment.signals,
       },
+      face: faceResult ? {
+        faceDetected: faceResult.faceDetected,
+        faceCount:    faceResult.faceCount,
+        confidence:   faceResult.confidence,
+      } : null,
     });
 
   } catch (error: unknown) {

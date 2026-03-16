@@ -573,7 +573,7 @@ export default function LandingPage() {
             <span className="text-xs font-bold" style={{ color: '#8b949e' }}>
               Image<span style={{ color: '#3fb950' }}>Trace</span>
             </span>
-            <span className="text-xs" style={{ color: '#30363d' }}>· Phase 05</span>
+            <span className="text-xs" style={{ color: '#30363d' }}>· </span>
           </div>
           <div className="flex items-center gap-4">
             {[

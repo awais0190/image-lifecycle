@@ -38,11 +38,19 @@ export interface RelationshipGraph {
   totalDepth:       number;
   confidenceScores: Map<string, number>;            // edge confidence per childHash
   clipUsed:         boolean;
+  unrelated:        AnalyzedImage[];                // excluded — below affinity threshold
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const MAX_DEPTH = 5;
+
+// Images whose best affinity score to ANY node in the tree falls below this
+// threshold are excluded from the tree entirely — they are unrelated images
+// that Google Vision returned due to visual keyword/scene overlap, not because
+// they are actually copies of the uploaded image.
+// Note: 'full' matchType images bypass this threshold and are always included.
+const MIN_AFFINITY_THRESHOLD = 0.28;
 
 // ─── Scoring helpers ──────────────────────────────────────────────────────────
 
@@ -123,6 +131,7 @@ export function buildRelationships(
   const nodes            = new Map<string, RelationshipNode>();
   const edges:             RelationshipEdge[]  = [];
   const confidenceScores = new Map<string, number>();
+  const unrelated:         AnalyzedImage[]     = [];
   let   anyClipUsed      = false;
 
   nodes.set(rootImage.pHash, {
@@ -168,6 +177,16 @@ export function buildRelationships(
       bestScore  = 0.3;
     }
 
+    // Exclude image if it has no meaningful relationship to anything in the tree.
+    // 'full' matchType images are always included — Vision confirmed exact match.
+    if (bestScore < MIN_AFFINITY_THRESHOLD && candidate.matchType !== 'full') {
+      unrelated.push(candidate);
+      console.log(
+        `[RelEngine] ${candidate.pHash.slice(0, 12)}… EXCLUDED (score ${bestScore.toFixed(2)} < ${MIN_AFFINITY_THRESHOLD}, type=${candidate.matchType}) — unrelated`
+      );
+      continue;
+    }
+
     if (bestClipUsed) anyClipUsed = true;
 
     const depth = Math.min(bestParent.depth + 1, MAX_DEPTH);
@@ -189,8 +208,8 @@ export function buildRelationships(
 
   const totalDepth = Math.max(0, ...[...nodes.values()].map((n) => n.depth));
   console.log(
-    `[RelEngine] ${nodes.size} nodes, ${edges.length} edges, maxDepth: ${totalDepth}, clipUsed: ${anyClipUsed}`
+    `[RelEngine] ${nodes.size} nodes, ${edges.length} edges, maxDepth: ${totalDepth}, clipUsed: ${anyClipUsed}, excluded: ${unrelated.length}`
   );
 
-  return { nodes, edges, rootHash: rootImage.pHash, totalDepth, confidenceScores, clipUsed: anyClipUsed };
+  return { nodes, edges, rootHash: rootImage.pHash, totalDepth, confidenceScores, clipUsed: anyClipUsed, unrelated };
 }

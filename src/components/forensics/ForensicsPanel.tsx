@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * ForensicsPanel — Phase 05
+ * ForensicsPanel — 
  * Section order:
  *   1. Status Banner (edit verdict)
  *   2. Edit Signals Panel (EXIF + ELA + CLIP breakdown)
@@ -10,7 +10,7 @@
  *   5. Camera Metadata  (GPS formatted as "40.71° N, 74.00° W" + map link)
  *   6. Fingerprints (real CLIP embedding)
  *
- * Phase 05:
+ * :
  *  - GPS formatted with N/S/E/W and "View on map" link
  *  - ELA PNG disclaimer badge
  *  - Null guards on every field — no "undefined" or "NaN" shown
