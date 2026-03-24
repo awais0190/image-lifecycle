@@ -1,7 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Image Lifecycle — TypeScript Interfaces
-// Phase 01: Core types. Phase 02: Analysis pipeline. Phase 03: Tree + Vision.
-// Phase 04: CLIP embedding, ELA forensics, edit assessment.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Raw EXIF / file metadata extracted from an image */
@@ -19,7 +17,7 @@ export interface ImageMetadata {
   };
 }
 
-// ── Phase 04 types ────────────────────────────────────────────────────────────
+// ── Edit assessment types ──────────────────────────────────────────────────────
 
 /** One signal contributing to the edit probability assessment */
 export interface EditSignal {
@@ -57,10 +55,9 @@ export interface ELAResult {
 export interface ForensicsResult {
   isEdited:         boolean;
   editingSoftware?: string;   // detected via metadata or heuristic
-  elaScore:         number;   // 0–1 (Phase 04: real value; previously 0)
+  elaScore:         number;   // 0–1
   elaHeatmapUrl?:   string;   // Cloudinary URL of ELA heatmap overlay
   confidence:       number;   // 0–1 probability
-  // Phase 04 additions
   editProbability?: number;               // 0–1 combined signal
   editVerdict?:     'original' | 'edited' | 'uncertain';
   signals?: {
@@ -69,7 +66,6 @@ export interface ForensicsResult {
     clip?:   EditSignal | null;
     visual?: EditSignal | null;
   };
-  // Phase 05 advanced edit report (colour + object diff)
   editReport?: {
     overall: {
       is_edited:  boolean;
@@ -119,7 +115,7 @@ export interface ImageNode {
   cryptoHash: string;               // SHA-256 of raw file bytes
 
   // ── Embedding ─────────────────────────────────────────────
-  clipEmbedding: number[];          // 512-dim CLIP vector (Phase 04)
+  clipEmbedding: number[];          // 512-dim CLIP vector
 
   // ── Storage ───────────────────────────────────────────────
   cloudinaryUrl:      string;
@@ -161,7 +157,7 @@ export interface TreeNode {
   };
 }
 
-// ── Phase 03 types ────────────────────────────────────────────────────────────
+// ── Vision & tree types ────────────────────────────────────────────────────────
 
 /** Single result from Google Vision Web Detection */
 export interface WebSearchResult {

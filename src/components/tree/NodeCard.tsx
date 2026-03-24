@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * NodeCard — Phase 03
+ * NodeCard
  * Slide-in detail panel shown when the user clicks a node in the tree canvas.
  * Overlays the right panel from the right edge.
  */

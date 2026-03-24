@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * ImageNodeCard — React Flow custom node component — Phase 04.
+ * ImageNodeCard — React Flow custom node component.
  * Adds an ELA score dot (red/amber/green) on the bottom-right of the card.
  */
 

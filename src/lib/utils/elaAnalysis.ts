@@ -1,5 +1,5 @@
 /**
- * elaAnalysis.ts — Phase 04
+ * elaAnalysis.ts
  * Error Level Analysis (ELA): detect image editing by comparing
  * compression artifacts between the original and a re-compressed version.
  *

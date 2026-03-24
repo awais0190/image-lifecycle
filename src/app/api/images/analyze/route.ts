@@ -1,5 +1,5 @@
 /**
- * POST /api/images/analyze — Phase 04 pipeline
+ * POST /api/images/analyze — 16-step provenance pipeline
  *
  *   1.  Parse request → buffer
  *   2.  Validate image

@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * EditSignalsPanel — Phase 04
+ * EditSignalsPanel
  * Displays all edit-detection signals with animated confidence bars.
  */
 

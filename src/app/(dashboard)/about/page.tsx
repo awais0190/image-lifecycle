@@ -3,7 +3,7 @@
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 import {
-  ScanSearch, GitCompareArrows, Microscope,
+  ScanSearch, GitCompareArrows,
   Globe, Cpu, ScanLine, Database, Layers,
   ShieldCheck, ArrowRight, TreePine, Binary,
   Zap, Hash, Info,
@@ -95,45 +95,51 @@ const TOOLS = [
   {
     href: '/analyze', icon: ScanSearch, color: '#3fb950',
     label: 'Image Analyzer',
-    desc:  'Full provenance pipeline — Vision search, tree construction, edit detection.',
+    desc:  'Full 16-step provenance pipeline — fingerprinting, 6-signal edit detection, Vision search, tree construction.',
   },
   {
     href: '/compare', icon: GitCompareArrows, color: '#58a6ff',
     label: 'Comparator',
-    desc:  'Side-by-side similarity analysis with pHash, CLIP, and ELA.',
+    desc:  'Side-by-side analysis with pHash, dHash, CLIP, DeepFace ArcFace, and multi-scale crop detection.',
   },
   {
-    href: '/forensics', icon: Microscope, color: '#d29922',
-    label: 'Forensics',
-    desc:  'Deep single-image analysis — ELA heatmap, EXIF, edit probability.',
+    href: '/batch', icon: Layers, color: '#d29922',
+    label: 'Batch Analyzer',
+    desc:  "Analyze 2–10 images to find parent/child/sibling relationships using Prim's MST algorithm.",
   },
 ];
 
 const TECH = [
-  { icon: ScanLine,  color: '#3fb950', label: 'Perceptual Hash (pHash)',  value: 'DCT-based 64-bit fingerprint' },
-  { icon: Cpu,       color: '#58a6ff', label: 'CLIP Embeddings',          value: '512-dim neural vector (OpenAI CLIP)' },
-  { icon: ScanLine,  color: '#d29922', label: 'Error Level Analysis',     value: 'JPEG recompression delta heatmap' },
-  { icon: Globe,     color: '#f85149', label: 'Google Vision API',        value: 'Web Detection — billions of pages' },
+  { icon: Cpu,       color: '#58a6ff', label: 'CLIP ViT-B/32',            value: '512-dim embedding + zero-shot editing classification' },
+  { icon: ShieldCheck,color:'#3fb950', label: 'DeepFace ArcFace',         value: 'Face verification across discovered copies' },
+  { icon: ScanLine,  color: '#3fb950', label: 'pHash + dHash',            value: '256-bit perceptual + difference fingerprints' },
+  { icon: ScanLine,  color: '#d29922', label: 'Error Level Analysis',     value: 'JPEG recompression delta heatmap (×10 amplified)' },
+  { icon: Globe,     color: '#f85149', label: 'Google Vision API',        value: 'Web Detection — full, partial, similar matches' },
   { icon: Hash,      color: '#8b949e', label: 'SHA-256',                  value: 'Cryptographic byte-exact identity' },
   { icon: Database,  color: '#3fb950', label: 'MongoDB Atlas',            value: 'Persistent provenance graph store' },
   { icon: Zap,       color: '#58a6ff', label: 'Cloudinary CDN',           value: 'Image hosting + ELA heatmap storage' },
-  { icon: TreePine,  color: '#d29922', label: 'React Flow',               value: 'Interactive directed graph rendering' },
-  { icon: Layers,    color: '#3fb950', label: 'Next.js App Router',       value: 'Full-stack React framework' },
-  { icon: Binary,    color: '#8b949e', label: 'Python CLIP Service',      value: 'Sidecar microservice for embeddings' },
+  { icon: TreePine,  color: '#d29922', label: 'React Flow',               value: 'Interactive directed provenance graph' },
+  { icon: Layers,    color: '#3fb950', label: 'Next.js App Router',       value: 'Full-stack React + API routes' },
+  { icon: Binary,    color: '#8b949e', label: 'Python FastAPI ML Service',value: 'CLIP, ArcFace, partial-match, color & object diff' },
 ];
 
 const ANALYZE_STEPS = [
-  { n: '1',  color: '#3fb950', title: 'Parse & validate',           detail: 'Accept file upload or URL. Validate MIME type, size (max 10 MB), and image integrity.' },
-  { n: '2',  color: '#3fb950', title: 'Generate fingerprints',      detail: 'Compute SHA-256 cryptographic hash, 64-bit pHash via DCT, and 512-dim CLIP neural embedding.' },
-  { n: '3',  color: '#3fb950', title: 'Exact duplicate check',      detail: 'Query MongoDB for matching SHA-256. Return cached result immediately if found.' },
-  { n: '4',  color: '#58a6ff', title: 'Similarity search',          detail: 'Compute pHash Hamming distance and CLIP cosine similarity against 200 most recent nodes.' },
-  { n: '5',  color: '#58a6ff', title: 'Upload to Cloudinary',       detail: 'Deterministic public_id (SHA-256 prefix) prevents redundant re-uploads.' },
-  { n: '6',  color: '#d29922', title: 'ELA analysis',               detail: 'Recompress at 95% JPEG quality, compute absolute pixel difference to produce heatmap.' },
-  { n: '7',  color: '#d29922', title: 'Edit assessment',            detail: 'Weighted combination of EXIF signals, ELA score, and CLIP drift to produce edit probability.' },
-  { n: '8',  color: '#f85149', title: 'Google Vision search',       detail: 'Web Detection finds full matches, partial matches, and visually similar images.' },
-  { n: '9',  color: '#f85149', title: 'Batch analyze copies',       detail: 'Download and fingerprint every discovered image. Re-run ELA + EXIF assessment.' },
-  { n: '10', color: '#8b949e', title: 'Build relationship graph',   detail: 'Assign parent/child edges by pHash distance and CLIP similarity. Compute tree depth.' },
-  { n: '11', color: '#8b949e', title: 'Persist & return tree',      detail: 'Upsert all ImageNodes into MongoDB. Return nested TreeJSON for React Flow rendering.' },
+  { n: '1',  color: '#3fb950', title: 'Parse & validate',             detail: 'Accept file upload or URL. Validate MIME type, size (max 15 MB), min dimensions (50×50), image integrity.' },
+  { n: '2',  color: '#3fb950', title: 'Fingerprint (4 methods)',       detail: 'Compute SHA-256, 256-bit pHash (DCT average), 256-bit dHash (difference), and 512-dim CLIP ViT-B/32 embedding in parallel.' },
+  { n: '3',  color: '#3fb950', title: 'EXIF extraction',               detail: 'Parse EXIF with exifr — camera make/model, software (Photoshop, GIMP, Lightroom, Canva…), GPS, timestamps.' },
+  { n: '4',  color: '#3fb950', title: 'Exact duplicate check',         detail: 'Query MongoDB by SHA-256. Return cached result immediately if found (seenCount incremented).' },
+  { n: '5',  color: '#58a6ff', title: 'Similarity search',             detail: 'pHash Hamming distance + CLIP cosine similarity against 200 most recent nodes. Returns nearest match.' },
+  { n: '6',  color: '#58a6ff', title: 'Upload to Cloudinary',          detail: 'Deterministic public_id (SHA-256 prefix) prevents redundant re-uploads.' },
+  { n: '7',  color: '#d29922', title: 'ELA heatmap',                   detail: 'Recompress at 95% → diff pixel-by-pixel → amplify ×10 → warm-color heatmap. elaScore = totalDiff / (pixels × 255).' },
+  { n: '8',  color: '#d29922', title: 'Visual heuristics',             detail: 'Detect text/watermark blocks, uniform borders, social-media crop formats, compression ratio anomalies, noise inconsistency across quadrants.' },
+  { n: '9',  color: '#d29922', title: '6-signal edit assessment',      detail: 'Weighted vote: EXIF (0.22), ELA (0.28), visual (0.12), structural pHash+CLIP (0.13), CLIP semantic (0.22), CLIP zero-shot classification (0.35).' },
+  { n: '10', color: '#f85149', title: 'Save root node',                detail: 'Upsert root ImageNode into MongoDB with all fingerprints, forensics, and metadata before Vision search.' },
+  { n: '11', color: '#f85149', title: 'Google Vision reverse search',  detail: 'Web Detection across billions of pages. Returns full, partial, and similar matches with platform detection.' },
+  { n: '12', color: '#f85149', title: 'Batch download & analyze',      detail: '5 concurrent downloads. Each copy: fingerprint, EXIF, ELA, visual heuristics, CLIP embedding, CLIP zero-shot, multi-scale crop detection, DeepFace ArcFace face verification.' },
+  { n: '13', color: '#8b949e', title: 'Upsert discovered nodes',       detail: 'For each copy: exact-match check, full edit assessment, add source platform. New nodes created, existing nodes updated.' },
+  { n: '14', color: '#8b949e', title: 'Build relationship graph',      detail: 'Weighted scoring: date heuristic (0.35) + pHash distance (0.20) + Vision match type (0.12) + CLIP (0.18) + crop boost (+0.40). Max depth 5.' },
+  { n: '15', color: '#8b949e', title: 'Persist edges',                 detail: 'Bulk MongoDB writes — update parent\'s children array, child\'s parentHash, and depth for all affected nodes.' },
+  { n: '16', color: '#8b949e', title: 'Return TreeJSON',               detail: 'Nested tree (children sorted by status), TreeStats (totals, platforms, depth), processingTime, discoveredCount. clipEmbedding stripped from response.' },
 ];
 
 export default function AboutPage() {
@@ -178,9 +184,10 @@ export default function AboutPage() {
                   spread as an interactive directed graph — the image&apos;s &ldquo;lifecycle.&rdquo;
                 </p>
                 <p className="mt-3 text-sm leading-relaxed" style={{ color: '#8b949e' }}>
-                  It combines cryptographic hashing, perceptual fingerprinting, neural semantic
-                  embeddings (CLIP), error-level analysis (ELA), EXIF forensics, and Google
-                  Vision reverse-image search into a single automated pipeline.
+                  It combines four fingerprinting methods (SHA-256, pHash, dHash, CLIP), six
+                  edit-detection signals including CLIP zero-shot classification and DeepFace
+                  ArcFace face verification, ELA heatmaps, EXIF forensics, and Google Vision
+                  reverse-image search — all orchestrated in a single 16-step pipeline.
                 </p>
               </div>
             </div>
@@ -227,7 +234,7 @@ export default function AboutPage() {
         <motion.div {...fadeUp(0.1)}>
           <SectionHeader
             label="Pipeline"
-            title="Image Analyzer — 11-step pipeline"
+            title="Image Analyzer — 16-step pipeline"
             sub="Every image submitted to the Analyzer runs through this exact sequence."
           />
           <Card>
@@ -243,24 +250,40 @@ export default function AboutPage() {
         <motion.div {...fadeUp(0.12)}>
           <SectionHeader
             label="Forensics"
-            title="How edit detection works"
+            title="How edit detection works — 6 signals"
+            sub="Six independent signals are weighted and voted on to produce a single edit probability score."
           />
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {[
               {
                 icon: ScanLine,  color: '#d29922',
-                title: 'Error Level Analysis',
-                body:  'The image is re-saved at 95% JPEG quality. Regions that were edited after the last save will show higher error levels than untouched areas. The pixel-by-pixel difference is amplified into a visible heatmap.',
+                title: 'ELA — Error Level Analysis (0.28)',
+                body:  'Re-saved at 95% JPEG quality. Pixel differences amplified ×10 into a warm-color heatmap. elaScore > 0.20 yields 95% edit confidence. Uploaded to Cloudinary under ela-heatmaps/.',
               },
               {
                 icon: Binary, color: '#8b949e',
-                title: 'EXIF Signal',
-                body:  'Metadata fields are analyzed for inconsistencies — photo editing software tags (Photoshop, GIMP, Lightroom), mismatched timestamps, missing camera fields that genuine camera photos always contain.',
+                title: 'EXIF Signal (0.22)',
+                body:  'Detects editing software tags: Photoshop, GIMP, Lightroom, Pixelmator, Affinity Photo, Canva, PicsArt, Snapseed. Missing camera fields and timestamp mismatches are also scored.',
               },
               {
                 icon: Cpu, color: '#58a6ff',
-                title: 'CLIP Signal',
-                body:  'A 512-dimensional neural embedding captures semantic image content. When a discovered copy drifts semantically from the uploaded image, it suggests cropping, color grading, or object insertion.',
+                title: 'CLIP Zero-Shot (0.35 — highest)',
+                body:  'CLIP ViT-B/32 classifies the image against 15 editing prompts (watermark, filter, meme, photoshopped, thumbnail, screenshot…) vs 3 original prompts. Softmax produces a calibrated edit probability.',
+              },
+              {
+                icon: Cpu, color: '#3fb950',
+                title: 'CLIP Semantic Drift (0.22)',
+                body:  'Cosine distance between root and copy 512-dim embeddings. Similarity < 0.60 (high semantic drift) scores 0.90 edit probability — suggests cropping, recoloring, or object insertion.',
+              },
+              {
+                icon: Zap, color: '#f85149',
+                title: 'Visual Heuristics (0.12)',
+                body:  'Scores five pixel-level patterns: text/watermark blocks (8×8 grid), uniform border strips, known social-media crop sizes, compression ratio anomalies, and noise inconsistency across quadrants.',
+              },
+              {
+                icon: ScanLine, color: '#8b949e',
+                title: 'Structural Signal (0.13)',
+                body:  'Fires when pHash distance ≥ 8 AND CLIP ≥ 0.75 simultaneously — a pattern typical of watermark additions, color grading, and caption overlays that pHash catches but CLIP scores as similar.',
               },
             ].map(({ icon: Icon, color, title, body }) => (
               <Card key={title}>
@@ -323,11 +346,11 @@ export default function AboutPage() {
           <Card>
             <ul className="space-y-3">
               {[
-                { icon: Globe,      color: '#f85149', text: 'Google Vision requires billing to be enabled on the GCP project. Without it, Vision returns no results and the tree will always have a single node.' },
-                { icon: ScanLine,   color: '#d29922', text: 'ELA is most reliable on JPEG images. PNG files use lossless compression, so ELA scores may be inflated even for unedited images.' },
-                { icon: Cpu,        color: '#58a6ff', text: 'CLIP similarity is only computed when the Python sidecar service is running. If offline, the system falls back to pHash-only matching.' },
-                { icon: ShieldCheck,color: '#8b949e', text: 'Edit detection produces a probability estimate, not a definitive verdict. A high score indicates likelihood of editing, not proof.' },
-                { icon: Database,   color: '#3fb950', text: 'The duplicate scanner only searches the 200 most recently uploaded nodes for performance. Very large databases may miss older near-duplicates.' },
+                { icon: Globe,      color: '#f85149', text: 'Google Vision requires billing to be enabled on the GCP project. Without it, Vision returns no results and the provenance tree will always have a single node.' },
+                { icon: ScanLine,   color: '#d29922', text: 'ELA is most reliable on JPEG images. PNG and WebP use lossless compression, so ELA scores may be inflated even for genuinely unedited images.' },
+                { icon: Cpu,        color: '#58a6ff', text: 'CLIP embeddings, zero-shot classification, ArcFace face verification, and partial-match detection all require the Python FastAPI ML service to be running. The system degrades gracefully to pHash-only when offline.' },
+                { icon: ShieldCheck,color: '#8b949e', text: 'Edit detection is a 6-signal weighted probability estimate, not a definitive verdict. A high score indicates likelihood of editing, not proof — treat results as investigative leads.' },
+                { icon: Database,   color: '#3fb950', text: 'The near-duplicate scanner searches only the 200 most recent nodes for performance. Very large databases may miss older matches.' },
               ].map(({ icon: Icon, color, text }) => (
                 <li key={text} className="flex items-start gap-3 text-xs" style={{ color: '#8b949e' }}>
                   <Icon size={13} className="mt-0.5 shrink-0" style={{ color }} />

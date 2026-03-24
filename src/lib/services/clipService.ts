@@ -1,5 +1,5 @@
 /**
- * clipService.ts — Phase 04
+ * clipService.ts
  * Typed HTTP client for the Python FastAPI CLIP microservice.
  *
  * Endpoints used:

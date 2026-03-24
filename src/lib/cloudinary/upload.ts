@@ -1,8 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Cloudinary — upload helper
 //
-// Phase 01: basic upload returning URL + dimensions.
-// Phase 02: add ELA heatmap generation, transformation chains.
+// Upload helper — returns URL + dimensions. Supports ELA heatmap uploads.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import '@/lib/cloudinary/config'; // ensure SDK is configured
@@ -91,7 +90,7 @@ export async function uploadImage(
  * Delete an image from Cloudinary by public ID.
  * Used during cleanup / admin operations.
  *
- * TODO Phase 04: wire up to admin API route.
+ * TODO: wire up to admin API route.
  */
 export async function deleteImage(publicId: string): Promise<void> {
   await cloudinary.uploader.destroy(publicId, { resource_type: 'image' });

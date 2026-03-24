@@ -3,10 +3,7 @@
 /**
  * Sidebar — currently a layout placeholder.
  *
- * TODO Phase 03: populate with:
- *   - Recent analysis history list
- *   - Filter controls (status, date range)
- *   - Quick-jump node search
+ * TODO: populate with recent analysis history, filter controls, node search.
  */
 
 import { LayoutDashboard, History, Settings } from 'lucide-react';

@@ -1,5 +1,5 @@
 /**
- * Relationship engine — Phase 04.
+ * Relationship engine.
  * Determines parent-child relationships between the root image and
  * all discovered copies, producing a directed graph.
  *
@@ -7,7 +7,7 @@
  *   Rule A — date heuristic  (0.40): later date → child of earlier image
  *   Rule B — pHash distance  (0.25): closer hash → more direct relationship
  *   Rule C — Google matchType(0.15): full/partial/similar → confidence proxy
- *   Rule D — CLIP similarity (0.20): semantic closeness (Phase 04)
+ *   Rule D — CLIP similarity (0.20): semantic closeness
  *
  * Rule D is skipped (weight redistributed) when either image lacks a CLIP embedding.
  */

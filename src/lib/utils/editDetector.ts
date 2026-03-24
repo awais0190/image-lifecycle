@@ -1,5 +1,5 @@
 /**
- * editDetector.ts — Phase 05
+ * editDetector.ts
  * Combines five signals into a single edit-probability assessment:
  *
  *   Signal 1 — EXIF software        (weight 0.15): known editor → high probability

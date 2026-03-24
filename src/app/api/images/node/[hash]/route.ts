@@ -2,7 +2,7 @@
  * GET  /api/images/node/[hash]   — fetch single ImageNode by pHash
  * PATCH /api/images/node/[hash]  — update node fields (admin / correction flow)
  *
- * TODO Phase 04 — implement PATCH:
+ * TODO — implement PATCH:
  *   1. Validate request body with Zod
  *   2. Only allow updating: sources[], forensics.isEdited, forensics.confidence
  *   3. Record audit trail (who changed what, when)
@@ -50,9 +50,9 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
 
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
   const { hash } = await params;
-  void request; // will be used in Phase 04
+  void request;
 
-  // TODO Phase 04: implement partial update (see file header)
+  // TODO: implement partial update (see file header)
   return NextResponse.json(
     {
       status: 'error',

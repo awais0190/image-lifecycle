@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * MetadataTable — Phase 02
+ * MetadataTable
  * Dark two-column table with alternating row shading, Framer Motion stagger,
  * optional monospace font, and muted placeholder for null values.
  */
