@@ -1,5 +1,5 @@
 /**
- * Relationship engine — Phase 04.
+ * Relationship engine.
  * Determines parent-child relationships between the root image and
  * all discovered copies, producing a directed graph.
  *
@@ -7,7 +7,7 @@
  *   Rule A — date heuristic  (0.40): later date → child of earlier image
  *   Rule B — pHash distance  (0.25): closer hash → more direct relationship
  *   Rule C — Google matchType(0.15): full/partial/similar → confidence proxy
- *   Rule D — CLIP similarity (0.20): semantic closeness (Phase 04)
+ *   Rule D — CLIP similarity (0.20): semantic closeness
  *
  * Rule D is skipped (weight redistributed) when either image lacks a CLIP embedding.
  */
@@ -38,11 +38,19 @@ export interface RelationshipGraph {
   totalDepth:       number;
   confidenceScores: Map<string, number>;            // edge confidence per childHash
   clipUsed:         boolean;
+  unrelated:        AnalyzedImage[];                // excluded — below affinity threshold
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const MAX_DEPTH = 5;
+
+// Images whose best affinity score to ANY node in the tree falls below this
+// threshold are excluded from the tree entirely — they are unrelated images
+// that Google Vision returned due to visual keyword/scene overlap, not because
+// they are actually copies of the uploaded image.
+// Note: 'full' matchType images bypass this threshold and are always included.
+const MIN_AFFINITY_THRESHOLD = 0.28;
 
 // ─── Scoring helpers ──────────────────────────────────────────────────────────
 
@@ -83,7 +91,8 @@ function parentAffinity(
   candidate:     AnalyzedImage,
   parent:        AnalyzedImage,
   candidateClip: number[] | null,
-  parentClip:    number[] | null
+  parentClip:    number[] | null,
+  isRootParent:  boolean,
 ): { score: number; clipUsed: boolean } {
   const dist  = hammingDistance(candidate.pHash, parent.pHash);
   const ruleA = scoreByDate(candidate.metadata.dateCreated, parent.metadata.dateCreated);
@@ -94,14 +103,27 @@ function parentAffinity(
     candidateClip !== null && parentClip !== null &&
     candidateClip.length === 512 && parentClip.length === 512;
 
+  // Rule E — partial/crop match against root: if template matching confirmed this
+  // discovered image is a spatial crop of the root (or vice versa), strongly boost
+  // its affinity so it is never excluded from the tree.
+  const partialBoost = isRootParent && candidate.isPartialOfRoot
+    ? candidate.partialMatchConfidence * 0.40   // up to +0.40 boost
+    : 0;
+
   if (hasClip) {
     const sim   = cosineSimilarity(candidateClip!, parentClip!);
     const ruleD = scoreByClip(sim);
-    return { score: 0.40 * ruleA + 0.25 * ruleB + 0.15 * ruleC + 0.20 * ruleD, clipUsed: true };
+    return {
+      score:    Math.min(1, 0.35 * ruleA + 0.20 * ruleB + 0.12 * ruleC + 0.18 * ruleD + partialBoost),
+      clipUsed: true,
+    };
   }
 
   // Redistribute CLIP weight proportionally to A, B, C
-  return { score: 0.50 * ruleA + 0.30 * ruleB + 0.20 * ruleC, clipUsed: false };
+  return {
+    score:    Math.min(1, 0.44 * ruleA + 0.27 * ruleB + 0.19 * ruleC + partialBoost),
+    clipUsed: false,
+  };
 }
 
 // ─── Main function ────────────────────────────────────────────────────────────
@@ -123,6 +145,7 @@ export function buildRelationships(
   const nodes            = new Map<string, RelationshipNode>();
   const edges:             RelationshipEdge[]  = [];
   const confidenceScores = new Map<string, number>();
+  const unrelated:         AnalyzedImage[]     = [];
   let   anyClipUsed      = false;
 
   nodes.set(rootImage.pHash, {
@@ -152,9 +175,10 @@ export function buildRelationships(
 
     for (const registeredNode of nodes.values()) {
       if (registeredNode.depth >= MAX_DEPTH) continue;
-      const parentClip = clipEmbeddings.get(registeredNode.pHash) ?? null;
+      const parentClip  = clipEmbeddings.get(registeredNode.pHash) ?? null;
+      const isRootParent = registeredNode.pHash === rootImage.pHash;
       const { score, clipUsed } = parentAffinity(
-        candidate, registeredNode.image, candidateClip, parentClip
+        candidate, registeredNode.image, candidateClip, parentClip, isRootParent
       );
       if (score > bestScore) {
         bestScore    = score;
@@ -166,6 +190,19 @@ export function buildRelationships(
     if (!bestParent) {
       bestParent = nodes.get(rootImage.pHash)!;
       bestScore  = 0.3;
+    }
+
+    // Exclude image if it has no meaningful relationship to anything in the tree.
+    // Bypass for: (a) Vision 'full' match — exact copy confirmed, and
+    //             (b) confirmed crop/partial of root — pHash changes on crop so
+    //                 the score may be low even though the images are clearly related.
+    const isConfirmedCrop = candidate.isPartialOfRoot && candidate.partialMatchConfidence >= 0.70;
+    if (bestScore < MIN_AFFINITY_THRESHOLD && candidate.matchType !== 'full' && !isConfirmedCrop) {
+      unrelated.push(candidate);
+      console.log(
+        `[RelEngine] ${candidate.pHash.slice(0, 12)}… EXCLUDED (score ${bestScore.toFixed(2)} < ${MIN_AFFINITY_THRESHOLD}, type=${candidate.matchType}) — unrelated`
+      );
+      continue;
     }
 
     if (bestClipUsed) anyClipUsed = true;
@@ -189,8 +226,8 @@ export function buildRelationships(
 
   const totalDepth = Math.max(0, ...[...nodes.values()].map((n) => n.depth));
   console.log(
-    `[RelEngine] ${nodes.size} nodes, ${edges.length} edges, maxDepth: ${totalDepth}, clipUsed: ${anyClipUsed}`
+    `[RelEngine] ${nodes.size} nodes, ${edges.length} edges, maxDepth: ${totalDepth}, clipUsed: ${anyClipUsed}, excluded: ${unrelated.length}`
   );
 
-  return { nodes, edges, rootHash: rootImage.pHash, totalDepth, confidenceScores, clipUsed: anyClipUsed };
+  return { nodes, edges, rootHash: rootImage.pHash, totalDepth, confidenceScores, clipUsed: anyClipUsed, unrelated };
 }

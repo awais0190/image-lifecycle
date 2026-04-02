@@ -1,8 +1,6 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Treat these native/ESM packages as server externals so Next.js
-  // doesn't attempt to bundle them through webpack.
   serverExternalPackages: ['sharp', 'exifr'],
 
   images: {

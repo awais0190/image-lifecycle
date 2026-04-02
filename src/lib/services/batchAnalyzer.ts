@@ -1,13 +1,16 @@
 /**
  * Batch image analyzer.
- * Downloads and fingerprints discovered images in parallel (max 5 concurrent).
- * Failures are logged and skipped — never crash the pipeline.
+ * Downloads, fingerprints, runs ELA, and extracts EXIF for each discovered URL.
+ * Processes max 5 at a time. Failures are logged and skipped.
  */
 
 import { downloadImageFromUrl, validateImageBuffer } from '@/lib/utils/imageIngestion';
 import { generateFingerprints }                      from '@/lib/utils/fingerprint';
 import { extractExifData }                           from '@/lib/utils/exifExtractor';
+import { performELA }                                from '@/lib/utils/elaAnalysis';
 import { hammingDistance }                           from '@/lib/utils/duplicateDetector';
+import { faceService }                               from '@/lib/services/faceService';
+import { analyzeVisualEdits }                        from '@/lib/utils/visualEditAnalysis';
 import type { WebSearchResult, ImageMetadata }       from '@/types/image';
 import type { EditingDetection }                     from '@/lib/utils/exifExtractor';
 
@@ -25,6 +28,18 @@ export interface AnalyzedImage {
   platform: string;
   downloadedAt: Date;
   downloadSuccess: boolean;
+  clipEmbedding:      number[] | null;
+  dHash:              string;
+  elaScore:           number;
+  elaHeatmapUrl:      string;
+  // Partial/crop match against the root image
+  isPartialOfRoot:        boolean;
+  partialMatchConfidence: number;
+  partialMatchWhich:      'B_in_A' | 'A_in_B' | null; // B_in_A = discovered is crop of root
+  // Visual + CLIP zero-shot edit analysis
+  visualEditScore:        number;
+  visualEditReasons:      string[];
+  clipEditProbability:    number;    // CLIP zero-shot editing probability (0–1)
 }
 
 // ─── Concurrency helper ───────────────────────────────────────────────────────
@@ -46,12 +61,14 @@ async function processInBatches<T, R>(
 // ─── Main function ────────────────────────────────────────────────────────────
 
 /**
- * Download, validate, fingerprint, and extract EXIF for each discovered URL.
+ * Download, validate, fingerprint, run ELA, extract EXIF, and check for crop
+ * relationship against the root image for each discovered URL.
  * Processes max 5 at a time. Returns only results that could be analyzed.
  */
 export async function analyzeDiscoveredImages(
-  results: WebSearchResult[],
-  rootPHash: string
+  results:    WebSearchResult[],
+  rootPHash:  string,
+  rootBuffer: Buffer | null = null,   // pass to enable crop detection vs root
 ): Promise<AnalyzedImage[]> {
   console.log(`[BatchAnalyzer] Analyzing ${results.length} discovered images (max 5 concurrent)...`);
 
@@ -75,14 +92,24 @@ export async function analyzeDiscoveredImages(
       throw new Error(validation.error);
     }
 
-    // Fingerprint + EXIF (parallel)
-    const [fps, exif] = await Promise.all([
+    // Fingerprint + EXIF + ELA + crop detection — all concurrent
+    const [fps, exif, ela, partialMatch] = await Promise.all([
       generateFingerprints(buffer),
       extractExifData(buffer),
+      performELA(buffer).catch(() => ({
+        elaScore: 0, elaHeatmapUrl: '', elaHeatmapPublicId: '',
+        isLikelyEdited: false, confidence: 0, highDiffRegions: 0, analysisTime: 0,
+      })),
+      rootBuffer
+        ? faceService.detectPartialMatch(rootBuffer, buffer).catch(() => null)
+        : Promise.resolve(null),
     ]);
 
-    // Drop buffer explicitly (let GC reclaim it)
-    (buffer as unknown as null);
+    // Visual analysis + CLIP editing classification (after EXIF so we have dimensions)
+    const [visualResult, clipEditResult] = await Promise.all([
+      analyzeVisualEdits(buffer, exif.width, exif.height, exif.fileSize).catch(() => null),
+      faceService.classifyEditing(buffer).catch(() => null),
+    ]);
 
     const pHashDist = hammingDistance(fps.pHash, rootPHash);
 
@@ -100,17 +127,27 @@ export async function analyzeDiscoveredImages(
         software:    exif.software,
         gps:         exif.gps,
       },
-      editingDetection: exif.editingDetection,
-      matchType:        result.matchType,
-      pHashDistance:    pHashDist,
-      googleScore:      result.score,
-      platform:         result.platform ?? 'Unknown',
-      downloadedAt:     new Date(),
-      downloadSuccess:  true,
+      editingDetection:       exif.editingDetection,
+      matchType:              result.matchType,
+      pHashDistance:          pHashDist,
+      googleScore:            result.score,
+      platform:               result.platform ?? 'Unknown',
+      downloadedAt:           new Date(),
+      downloadSuccess:        true,
+      clipEmbedding:          fps.clipEmbedding,
+      dHash:                  fps.dHash,
+      elaScore:               ela.elaScore,
+      elaHeatmapUrl:          ela.elaHeatmapUrl,
+      isPartialOfRoot:        partialMatch?.isPartial   ?? false,
+      partialMatchConfidence: partialMatch?.confidence  ?? 0,
+      partialMatchWhich:      partialMatch?.which       ?? null,
+      visualEditScore:        visualResult?.editScore      ?? 0,
+      visualEditReasons:      visualResult?.reasons        ?? [],
+      clipEditProbability:    clipEditResult?.editProbability ?? 0,
     };
 
     console.log(
-      `[BatchAnalyzer] ✓ Done ${label} — pHash dist: ${pHashDist}, platform: ${analyzed.platform}`
+      `[BatchAnalyzer] ✓ Done ${label} — pHashDist: ${pHashDist}, ELA: ${ela.elaScore.toFixed(4)}, CLIP: ${fps.clipEmbedding ? '512d' : 'null'}, crop: ${analyzed.isPartialOfRoot}, platform: ${analyzed.platform}`
     );
     return analyzed;
   });

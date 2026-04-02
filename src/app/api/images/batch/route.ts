@@ -23,18 +23,21 @@ import { assessEditProbability }      from '@/lib/utils/editDetector';
 import { uploadImage }                from '@/lib/cloudinary/upload';
 import { hammingDistance }            from '@/lib/utils/duplicateDetector';
 import { cosineSimilarity }           from '@/lib/services/clipService';
+import { faceService }                from '@/lib/services/faceService';
+import type { FaceMatchLevel }        from '@/lib/services/faceService';
+
 
 export const maxDuration = 120;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface BatchNode {
-  id:            string;
-  filename:      string;
-  cloudinaryUrl: string;
-  pHash:         string;
-  cryptoHash:    string;
-  clipEmbedding: number[] | null;
+  id:             string;
+  filename:       string;
+  cloudinaryUrl:  string;
+  pHash:          string;
+  cryptoHash:     string;
+  clipEmbedding:  number[] | null;
   metadata: {
     width: number; height: number; format: string; fileSize: number;
     dateCreated: string | null; camera: string | null; software: string | null;
@@ -48,6 +51,8 @@ export interface BatchNode {
     editProbability: number;
     overallConfidence: number;
   };
+  faceDetected:  boolean;
+  faceCount:     number;
   originalityScore: number;  // 0–1, higher = more likely original
   avgSimilarity:    number;   // average combined similarity to all other batch images
   isOutlier:        boolean;  // true if this image is unrelated to the main cluster
@@ -63,6 +68,13 @@ export interface BatchEdge {
   pHashDistance:   number;
   clipSimilarity:  number | null;
   relationshipType: 'identical' | 'near-duplicate' | 'similar' | 'related' | 'different';
+  faceMatch: {
+    matchLevel:   FaceMatchLevel;
+    confidence:   number;
+    verified:     boolean;
+    distance:     number;
+    faceDetected: boolean;
+  } | null;
 }
 
 // ─── Originality score ────────────────────────────────────────────────────────
@@ -76,16 +88,16 @@ function computeOriginalityScore(
   height:          number,
   maxPixels:       number,
 ): number {
-  let score = 1 - editProbability;                         // base: low edit prob = more original
+  // Resolution is the most reliable signal: originals are almost always the largest.
+  const pixelRatio = maxPixels > 0 ? (width * height) / maxPixels : 0.5;
+  let score = pixelRatio * 0.35;                          // 35% weight on relative resolution
 
-  if (camera)                       score += 0.12;         // has camera EXIF → likely real photo
-  if (!software)                    score += 0.08;         // no editing software → untouched
-  else                              score -= 0.15;         // editing software found → likely edited
-  if (dateCreated)                  score += 0.05;         // has timestamp
-  if (maxPixels > 0) {
-    const pixelRatio = (width * height) / maxPixels;
-    score += pixelRatio * 0.10;                            // higher resolution = slightly more original
-  }
+  score += (1 - editProbability) * 0.30;                  // 30% from ELA/EXIF edit probability
+
+  if (camera)    score += 0.15;                           // camera EXIF → real photo, not a download
+  if (!software) score += 0.10;                           // no editing software → untouched
+  else           score -= 0.15;                           // editing software found → processed copy
+  if (dateCreated) score += 0.05;                         // has EXIF timestamp → likely camera original
 
   return Math.max(0, Math.min(1, score));
 }
@@ -131,11 +143,10 @@ function buildTree(nodes: BatchNode[]): { edges: BatchEdge[]; rootId: string; av
   if (n === 0) return { edges: [], rootId: '', avgSimilarities: {} };
   if (n === 1) return { edges: [], rootId: nodes[0].id, avgSimilarities: { [nodes[0].id]: 1 } };
 
-  // ── Step 1: Pre-compute all pairwise similarities ────────────────────────
-  // pairSim[i][j] = combinedSimilarity between nodes[i] and nodes[j]
-  const pairSim:  number[][]        = Array.from({ length: n }, () => new Array(n).fill(0));
+  // Pre-compute all pairwise similarities
+  const pairSim:  number[][]          = Array.from({ length: n }, () => new Array(n).fill(0));
   const pairClip: (number | null)[][] = Array.from({ length: n }, () => new Array(n).fill(null));
-  const pairDist: number[][]        = Array.from({ length: n }, () => new Array(n).fill(0));
+  const pairDist: number[][]          = Array.from({ length: n }, () => new Array(n).fill(0));
 
   for (let i = 0; i < n; i++) {
     for (let j = i + 1; j < n; j++) {
@@ -143,14 +154,14 @@ function buildTree(nodes: BatchNode[]): { edges: BatchEdge[]; rootId: string; av
       const clip = nodes[i].clipEmbedding && nodes[j].clipEmbedding
         ? cosineSimilarity(nodes[i].clipEmbedding!, nodes[j].clipEmbedding!)
         : null;
-      const sim  = combinedSimilarity(dist, clip);
+      const sim = combinedSimilarity(dist, clip);
       pairSim[i][j]  = pairSim[j][i]  = sim;
       pairClip[i][j] = pairClip[j][i] = clip;
       pairDist[i][j] = pairDist[j][i] = dist;
     }
   }
 
-  // ── Step 2: Compute average similarity of each node to all others ─────────
+  // Average similarity of each node to all others (outlier detection + root selection)
   const avgSim: number[] = nodes.map((_, i) => {
     const total = nodes.reduce((sum, __, j) => i === j ? sum : sum + pairSim[i][j], 0);
     return total / (n - 1);
@@ -159,45 +170,107 @@ function buildTree(nodes: BatchNode[]): { edges: BatchEdge[]; rootId: string; av
   const avgSimilarities: Record<string, number> = {};
   nodes.forEach((node, i) => { avgSimilarities[node.id] = avgSim[i]; });
 
-  // ── Step 3: Cluster-aware root selection ─────────────────────────────────
-  // rootScore = avgSim (65%) + originalityScore (35%)
-  // → Outlier images (low avgSim) cannot become root no matter how "original" their EXIF looks
+  // ── Date and resolution arrays for directionality signals ─────────────────
+  // These are the most reliable "which came first" signals.
+  // Date: earlier = more likely original.  Resolution: larger = more likely original.
+  const timestamps: (number | null)[] = nodes.map((n) => {
+    const d = n.metadata.dateCreated ? new Date(n.metadata.dateCreated).getTime() : null;
+    return d && !isNaN(d) ? d : null;
+  });
+  const pixels: number[] = nodes.map((n) => n.metadata.width * n.metadata.height);
+
+  const validTs    = timestamps.filter((t): t is number => t !== null);
+  const minTs      = validTs.length > 1 ? Math.min(...validTs) : null;
+  const maxTs      = validTs.length > 1 ? Math.max(...validTs) : null;
+  const datesUseful = minTs !== null && maxTs !== null && maxTs > minTs; // only useful if images differ in date
+
+  // Normalized date score for root selection: 1.0 = earliest (most original), 0.0 = latest
+  const dateScore: number[] = timestamps.map((t) => {
+    if (!datesUseful || t === null) return 0.5;
+    return 1 - (t - minTs!) / (maxTs! - minTs!);
+  });
+
+  const maxPixels = Math.max(...pixels);
+
+  // ── Root selection ─────────────────────────────────────────────────────────
+  // Priority: date (strongest) → cluster centrality → originality → resolution
+  // An image with the earliest date and high cluster centrality is the root.
   let rootIdx = 0;
   let bestRootScore = -Infinity;
   nodes.forEach((node, i) => {
-    const score = avgSim[i] * 0.65 + node.originalityScore * 0.35;
+    const resSore  = maxPixels > 0 ? pixels[i] / maxPixels : 0.5;
+    const score    = avgSim[i]             * 0.40
+                   + node.originalityScore * 0.20
+                   + dateScore[i]          * 0.30   // date is strongest single signal
+                   + resSore               * 0.10;  // higher-res images tend to be originals
     if (score > bestRootScore) { bestRootScore = score; rootIdx = i; }
   });
   const rootId = nodes[rootIdx].id;
 
-  // ── Step 4: Prim's MST using pre-computed similarities ───────────────────
-  const placed  = new Set<number>([rootIdx]);
-  const edges:  BatchEdge[] = [];
+  // ── Prim's MST with direction-aware parent selection ──────────────────────
+  //
+  // Step 1 (Prim's): always attach the unplaced node most connected to placed set.
+  // Step 2 (direction): among placed nodes within SIM_TOLERANCE of the best
+  //   similarity, pick the parent with the strongest "came before" signal:
+  //   1. Earlier date (strongest)
+  //   2. Higher resolution (moderate)
+  //   3. Higher originality score (fallback)
+  //
+  // This prevents a copy from being assigned as the parent of the original even
+  // when the copy happens to be slightly more similar (common after heavy edits).
+  const SIM_TOLERANCE = 0.15;
+
+  const placed = new Set<number>([rootIdx]);
+  const edges: BatchEdge[] = [];
 
   while (placed.size < n) {
-    let bestScore    = -Infinity;
-    let bestI        = -1;
-    let bestJ        = -1;
-
+    // Step 1: find the unplaced node most connected to the placed set
+    let maxConn = -Infinity, nextNode = -1;
     for (let j = 0; j < n; j++) {
       if (placed.has(j)) continue;
-      for (const i of placed) {
-        if (pairSim[i][j] > bestScore) {
-          bestScore = pairSim[i][j];
-          bestI     = i;
-          bestJ     = j;
-        }
+      let conn = -Infinity;
+      for (const i of placed) { if (pairSim[i][j] > conn) conn = pairSim[i][j]; }
+      if (conn > maxConn) { maxConn = conn; nextNode = j; }
+    }
+
+    // Step 2: best parent = most "upstream" placed node within similarity tolerance
+    let bestSimToNext = -Infinity;
+    for (const i of placed) { if (pairSim[i][nextNode] > bestSimToNext) bestSimToNext = pairSim[i][nextNode]; }
+
+    let chosenParent = -1, chosenParentScore = -Infinity;
+    const tj = timestamps[nextNode];
+    const pj = pixels[nextNode];
+
+    for (const i of placed) {
+      if (pairSim[i][nextNode] < bestSimToNext * (1 - SIM_TOLERANCE)) continue;
+
+      let parentScore = nodes[i].originalityScore; // base
+
+      // Date signal: placed node with earlier date strongly preferred as parent
+      const ti = timestamps[i];
+      if (ti !== null && tj !== null && ti !== tj) {
+        parentScore += ti < tj ? 0.50 : -0.50; // big push toward earlier = parent
+      }
+
+      // Resolution signal: higher-resolution placed node preferred as parent
+      if (pj > 0 && pixels[i] > pj * 1.15) parentScore += 0.20;  // i is noticeably larger
+      if (pj > 0 && pixels[i] < pj * 0.85) parentScore -= 0.10;  // i is noticeably smaller
+
+      if (parentScore > chosenParentScore) {
+        chosenParentScore = parentScore;
+        chosenParent      = i;
       }
     }
 
-    placed.add(bestJ);
+    placed.add(nextNode);
     edges.push({
-      id:              `${nodes[bestI].id}→${nodes[bestJ].id}`,
-      parentId:        nodes[bestI].id,
-      childId:         nodes[bestJ].id,
-      pHashDistance:   pairDist[bestI][bestJ],
-      clipSimilarity:  pairClip[bestI][bestJ],
-      relationshipType: getRelationshipType(pairDist[bestI][bestJ], pairClip[bestI][bestJ]),
+      id:               `${nodes[chosenParent].id}→${nodes[nextNode].id}`,
+      parentId:         nodes[chosenParent].id,
+      childId:          nodes[nextNode].id,
+      pHashDistance:    pairDist[chosenParent][nextNode],
+      clipSimilarity:   pairClip[chosenParent][nextNode],
+      relationshipType: getRelationshipType(pairDist[chosenParent][nextNode], pairClip[chosenParent][nextNode]),
+      faceMatch:        null,
     });
   }
 
@@ -207,6 +280,8 @@ function buildTree(nodes: BatchNode[]): { edges: BatchEdge[]; rootId: string; av
 // ─── Analyse one image ────────────────────────────────────────────────────────
 
 async function analyseOne(buffer: Buffer, filename: string, id: string): Promise<BatchNode> {
+  // CLIP, EXIF, upload run in parallel — face detection is kept out of here
+  // and run sequentially later to avoid overloading the ML service.
   const [fingerprints, exifData, uploadResult] = await Promise.all([
     generateFingerprints(buffer),
     extractExifData(buffer),
@@ -247,8 +322,10 @@ async function analyseOne(buffer: Buffer, filename: string, id: string): Promise
       editProbability:   assessment.editProbability,
       overallConfidence: assessment.overallConfidence,
     },
-    originalityScore: 0,  // filled after all images processed (need maxPixels)
-    avgSimilarity:    0,  // filled by buildTree
+    faceDetected:  false,   // filled in sequentially after analyseOne
+    faceCount:     0,
+    originalityScore: 0,
+    avgSimilarity:    0,
     isOutlier:        false,
     parentId:  null,
     childIds:  [],
@@ -286,10 +363,17 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Analyse all images in parallel
+    // Analyse all images in parallel (CLIP + ELA + EXIF + upload only)
     const rawNodes = await Promise.all(
       buffers.map((buf, i) => analyseOne(buf, files[i].name, String(i)))
     );
+
+    // Face detection — run one image at a time to avoid overloading DeepFace
+    for (let i = 0; i < rawNodes.length; i++) {
+      const result = await faceService.detectFace(buffers[i]);
+      rawNodes[i].faceDetected = result?.faceDetected ?? false;
+      rawNodes[i].faceCount    = result?.faceCount    ?? 0;
+    }
 
     // Compute originality scores (need maxPixels for relative comparison)
     const maxPixels = Math.max(...rawNodes.map((n) => n.metadata.width * n.metadata.height));
@@ -306,13 +390,81 @@ export async function POST(request: NextRequest) {
       ),
     }));
 
-    // Build parent/child tree (cluster-aware root selection)
-    const { edges, rootId, avgSimilarities } = buildTree(nodes);
+    // Identify outliers BEFORE building the tree so unrelated images are excluded
+    // from it entirely (only meaningful for 3+ images).
+    const outlierSet = new Set<string>();
+    if (nodes.length > 2) {
+      const nAll = nodes.length;
+      const quickSim: number[][] = Array.from({ length: nAll }, () => new Array(nAll).fill(0) as number[]);
+      for (let i = 0; i < nAll; i++) {
+        for (let j = i + 1; j < nAll; j++) {
+          const dist = hammingDistance(nodes[i].pHash, nodes[j].pHash);
+          const clip = nodes[i].clipEmbedding && nodes[j].clipEmbedding
+            ? cosineSimilarity(nodes[i].clipEmbedding!, nodes[j].clipEmbedding!)
+            : null;
+          quickSim[i][j] = quickSim[j][i] = combinedSimilarity(dist, clip);
+        }
+      }
+      const avgSims = nodes.map((_, i) =>
+        nodes.reduce((s, __, j) => i === j ? s : s + quickSim[i][j], 0) / (nAll - 1)
+      );
+      const batchMean = avgSims.reduce((a, b) => a + b, 0) / nAll;
+      const threshold  = batchMean * 0.60;  // >40% below mean → unrelated
+      nodes.forEach((node, i) => { if (avgSims[i] < threshold) outlierSet.add(node.id); });
+    }
 
-    // Annotate nodes with parentId, childIds, depth, avgSimilarity
+    // Split: tree nodes go into the provenance tree; outliers are returned separately
+    const nodesForTree = outlierSet.size > 0 ? nodes.filter((n) => !outlierSet.has(n.id)) : nodes;
+    const outlierNodes = outlierSet.size > 0 ? nodes.filter((n) =>  outlierSet.has(n.id)) : [];
+
+    // Build parent/child tree (cluster-aware root selection) — outliers excluded
+    const { edges: rawEdges, rootId, avgSimilarities } = buildTree(nodesForTree);
+
+    // Augment MST edges with face comparison + crop detection — run sequentially,
+    // one at a time, to avoid firing concurrent DeepFace requests that crash the ML service.
+    const edges: BatchEdge[] = [];
+    for (const edge of rawEdges) {
+      const bufA = buffers[parseInt(edge.parentId)];
+      const bufB = buffers[parseInt(edge.childId)];
+
+      // Face comparison (sequential — DeepFace can't handle concurrent requests)
+      const faceCompare = await faceService.compareFaces(bufA, bufB);
+
+      // Partial/crop detection (fast OpenCV, doesn't affect face model)
+      const partialMatch = await faceService.detectPartialMatch(bufA, bufB);
+
+      // Downgrade relationship type when faces are detected but don't match
+      let { relationshipType } = edge;
+      if (faceCompare?.faceDetected && faceCompare.matchLevel === 'no_match') {
+        if      (relationshipType === 'near-duplicate') relationshipType = 'similar';
+        else if (relationshipType === 'similar')        relationshipType = 'related';
+        else if (relationshipType === 'related')        relationshipType = 'different';
+      }
+
+      // Upgrade relationship type when a spatial crop is detected —
+      // pHash changes completely on a crop so the MST edge may be under-scored.
+      if (partialMatch?.isPartial) {
+        if      (relationshipType === 'different') relationshipType = 'related';
+        else if (relationshipType === 'related')   relationshipType = 'similar';
+      }
+
+      edges.push({
+        ...edge,
+        relationshipType,
+        faceMatch: faceCompare ? {
+          matchLevel:   faceCompare.matchLevel,
+          confidence:   faceCompare.confidence,
+          verified:     faceCompare.verified,
+          distance:     faceCompare.distance,
+          faceDetected: faceCompare.faceDetected,
+        } : null,
+      });
+    }
+
+    // Annotate tree nodes with parentId, childIds, depth
     for (const edge of edges) {
-      const child  = nodes.find((n) => n.id === edge.childId)!;
-      const parent = nodes.find((n) => n.id === edge.parentId)!;
+      const child  = nodesForTree.find((n) => n.id === edge.childId)!;
+      const parent = nodesForTree.find((n) => n.id === edge.parentId)!;
       child.parentId = edge.parentId;
       parent.childIds.push(edge.childId);
     }
@@ -322,22 +474,15 @@ export async function POST(request: NextRequest) {
     const queue    = [rootId];
     while (queue.length > 0) {
       const pid  = queue.shift()!;
-      const node = nodes.find((n) => n.id === pid)!;
+      const node = nodesForTree.find((n) => n.id === pid)!;
       for (const cid of node.childIds) {
         depthMap.set(cid, (depthMap.get(pid) ?? 0) + 1);
         queue.push(cid);
       }
     }
-    nodes.forEach((n) => { n.depth = depthMap.get(n.id) ?? 0; });
+    nodesForTree.forEach((n) => { n.depth = depthMap.get(n.id) ?? 0; });
 
-    // Outlier threshold: if avg similarity to all others is much lower than
-    // the batch mean, flag the node as an outlier (unrelated image)
-    const avgSimValues = Object.values(avgSimilarities);
-    const batchMeanSim = avgSimValues.reduce((a, b) => a + b, 0) / avgSimValues.length;
-    const outlierThreshold = batchMeanSim * 0.60;  // more than 40% below mean → outlier
-
-    // Build pairwise similarity matrix for UI — reuse pre-computed pairs from buildTree
-    // We rebuild here because buildTree internal arrays aren't exported, but n≤10 so it's fast
+    // Build pairwise similarity matrix for UI — include ALL nodes (even outliers) for reference
     const matrix: Array<{ a: string; b: string; pHashDistance: number; clipSimilarity: number | null }> = [];
     for (let i = 0; i < nodes.length; i++) {
       for (let j = i + 1; j < nodes.length; j++) {
@@ -349,11 +494,17 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Strip clipEmbedding from response (large array), attach avgSimilarity + isOutlier
-    const responseNodes = nodes.map(({ clipEmbedding: _, ...rest }) => ({
+    // Strip clipEmbedding from response
+    const responseNodes = nodesForTree.map(({ clipEmbedding: _, ...rest }) => ({
       ...rest,
       avgSimilarity: avgSimilarities[rest.id] ?? 0,
-      isOutlier:     (avgSimilarities[rest.id] ?? 0) < outlierThreshold,
+      isOutlier:     false,
+    }));
+
+    const responseOutliers = outlierNodes.map(({ clipEmbedding: _, ...rest }) => ({
+      ...rest,
+      avgSimilarity: 0,
+      isOutlier:     true,
     }));
 
     return NextResponse.json({
@@ -361,6 +512,7 @@ export async function POST(request: NextRequest) {
       processingTime: Date.now() - startTime,
       rootId,
       nodes:          responseNodes,
+      outlierNodes:   responseOutliers,
       edges,
       matrix,
     });

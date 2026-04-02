@@ -1,7 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Image Lifecycle — TypeScript Interfaces
-// Phase 01: Core types. Phase 02: Analysis pipeline. Phase 03: Tree + Vision.
-// Phase 04: CLIP embedding, ELA forensics, edit assessment.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Raw EXIF / file metadata extracted from an image */
@@ -19,7 +17,7 @@ export interface ImageMetadata {
   };
 }
 
-// ── Phase 04 types ────────────────────────────────────────────────────────────
+// ── Edit assessment types ──────────────────────────────────────────────────────
 
 /** One signal contributing to the edit probability assessment */
 export interface EditSignal {
@@ -34,9 +32,10 @@ export interface EditAssessment {
   verdict: 'original' | 'edited' | 'uncertain';
   verdictThresholds: { edited: number; uncertain: number };
   signals: {
-    exif: EditSignal;
-    ela:  EditSignal;
-    clip: EditSignal | null;
+    exif:   EditSignal;
+    ela:    EditSignal;
+    clip:   EditSignal | null;
+    visual: EditSignal | null;
   };
   overallConfidence: number; // 0–1
 }
@@ -56,17 +55,45 @@ export interface ELAResult {
 export interface ForensicsResult {
   isEdited:         boolean;
   editingSoftware?: string;   // detected via metadata or heuristic
-  elaScore:         number;   // 0–1 (Phase 04: real value; previously 0)
+  elaScore:         number;   // 0–1
   elaHeatmapUrl?:   string;   // Cloudinary URL of ELA heatmap overlay
   confidence:       number;   // 0–1 probability
-  // Phase 04 additions
   editProbability?: number;               // 0–1 combined signal
   editVerdict?:     'original' | 'edited' | 'uncertain';
   signals?: {
-    exif?: EditSignal;
-    ela?:  EditSignal;
-    clip?: EditSignal | null;
+    exif?:   EditSignal;
+    ela?:    EditSignal;
+    clip?:   EditSignal | null;
+    visual?: EditSignal | null;
   };
+  editReport?: {
+    overall: {
+      is_edited:  boolean;
+      confidence: number;
+      edit_types: string[];
+      severity:   'none' | 'minor' | 'moderate' | 'major';
+      summary:    string;
+    };
+    color?: {
+      color_changed:    boolean;
+      confidence:       number;
+      change_type:      string;
+      change_intensity: number;
+      details?: {
+        hue_shift:           number;
+        saturation_change:   number;
+        brightness_change:   number;
+        affected_percentage: number;
+      };
+    };
+    objects?: {
+      objects_changed:     boolean;
+      total_changed_area:  number;
+      change_intensity:    number;
+      diff_heatmap_base64: string | null;
+      regions?: { type: string; area_percentage: number }[];
+    };
+  } | null;
 }
 
 /** Source reference: where this image was found on the web */
@@ -88,7 +115,7 @@ export interface ImageNode {
   cryptoHash: string;               // SHA-256 of raw file bytes
 
   // ── Embedding ─────────────────────────────────────────────
-  clipEmbedding: number[];          // 512-dim CLIP vector (Phase 04)
+  clipEmbedding: number[];          // 512-dim CLIP vector
 
   // ── Storage ───────────────────────────────────────────────
   cloudinaryUrl:      string;
@@ -130,7 +157,7 @@ export interface TreeNode {
   };
 }
 
-// ── Phase 03 types ────────────────────────────────────────────────────────────
+// ── Vision & tree types ────────────────────────────────────────────────────────
 
 /** Single result from Google Vision Web Detection */
 export interface WebSearchResult {

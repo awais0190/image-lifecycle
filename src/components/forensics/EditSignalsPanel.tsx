@@ -1,14 +1,14 @@
 'use client';
 
 /**
- * EditSignalsPanel — Phase 04
+ * EditSignalsPanel
  * Displays all edit-detection signals with animated confidence bars.
  */
 
 import { motion }    from 'framer-motion';
 import {
   ShieldCheck, ShieldAlert, AlertTriangle,
-  FileImage, ScanLine, Cpu,
+  FileImage, ScanLine, Cpu, Eye,
 } from 'lucide-react';
 import type { EditAssessment, EditSignal } from '@/types/image';
 
@@ -150,15 +150,20 @@ export default function EditSignalsPanel({ assessment }: EditSignalsPanelProps) 
             <div style={{ borderTop: '1px solid #30363d' }} />
             <SignalRow
               icon={<Cpu size={11} />}
-              name="CLIP Similarity"
+              name="CLIP / Structural"
               signal={signals.clip}
             />
           </>
         )}
-        {!signals.clip && (
-          <p className="text-xs" style={{ color: '#30363d' }}>
-            CLIP signal unavailable — service offline
-          </p>
+        {signals.visual && (
+          <>
+            <div style={{ borderTop: '1px solid #30363d' }} />
+            <SignalRow
+              icon={<Eye size={11} />}
+              name="Visual Analysis"
+              signal={signals.visual}
+            />
+          </>
         )}
       </div>
     </div>

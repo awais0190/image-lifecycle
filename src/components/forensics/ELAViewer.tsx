@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * ELAViewer — Phase 04
+ * ELAViewer
  * Side-by-side original vs ELA heatmap comparison with score display.
  */
 

@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * ForensicsPanel — Phase 05
+ * ForensicsPanel — 
  * Section order:
  *   1. Status Banner (edit verdict)
  *   2. Edit Signals Panel (EXIF + ELA + CLIP breakdown)
@@ -10,7 +10,7 @@
  *   5. Camera Metadata  (GPS formatted as "40.71° N, 74.00° W" + map link)
  *   6. Fingerprints (real CLIP embedding)
  *
- * Phase 05:
+ * :
  *  - GPS formatted with N/S/E/W and "View on map" link
  *  - ELA PNG disclaimer badge
  *  - Null guards on every field — no "undefined" or "NaN" shown
@@ -28,6 +28,7 @@ import StatusBadge       from '@/components/shared/StatusBadge';
 import MetadataTable     from '@/components/forensics/MetadataTable';
 import ELAViewer         from '@/components/forensics/ELAViewer';
 import EditSignalsPanel  from '@/components/forensics/EditSignalsPanel';
+import EditTypeCards     from '@/components/forensics/EditTypeCards';
 import type { ImageNode, EditAssessment } from '@/types/image';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -155,9 +156,10 @@ function NodeContent({ node }: { node: ImageNode }) {
         verdict:           forensics.editVerdict ?? (forensics.isEdited ? 'edited' : 'original'),
         verdictThresholds: { edited: 0.65, uncertain: 0.35 },
         signals: {
-          exif: forensics.signals!.exif!,
-          ela:  forensics.signals!.ela!,
-          clip: forensics.signals?.clip ?? null,
+          exif:   forensics.signals!.exif!,
+          ela:    forensics.signals!.ela!,
+          clip:   forensics.signals?.clip ?? null,
+          visual: forensics.signals?.visual ?? null,
         },
         overallConfidence: forensics.confidence,
       }
@@ -247,7 +249,14 @@ function NodeContent({ node }: { node: ImageNode }) {
         </Section>
       )}
 
-      {/* 3 — ELA Viewer */}
+      {/* 3 — Advanced Edit Analysis (colour + object diff) */}
+      {forensics.editReport && (
+        <Section title="Advanced Edit Analysis" icon={<ShieldAlert size={12} />}>
+          <EditTypeCards editReport={forensics.editReport} />
+        </Section>
+      )}
+
+      {/* 4 — ELA Viewer */}
       {node.cloudinaryUrl && (
         <Section
           title="ELA Analysis"
@@ -279,7 +288,7 @@ function NodeContent({ node }: { node: ImageNode }) {
         </Section>
       )}
 
-      {/* 4 — File Info */}
+      {/* 5 — File Info */}
       <Section title="File Info" icon={<FileImage size={12} />}>
         <MetadataTable
           rows={[
@@ -291,7 +300,7 @@ function NodeContent({ node }: { node: ImageNode }) {
         />
       </Section>
 
-      {/* 5 — Camera Metadata */}
+      {/* 6 — Camera Metadata */}
       <Section title="Camera Metadata" icon={<Camera size={12} />}>
         {metadata.camera ? (
           <>
@@ -337,7 +346,7 @@ function NodeContent({ node }: { node: ImageNode }) {
         )}
       </Section>
 
-      {/* 6 — Fingerprints */}
+      {/* 7 — Fingerprints */}
       <Section title="Fingerprints" icon={<Hash size={12} />}>
         <div className="overflow-hidden rounded-lg" style={{ border: '1px solid #30363d' }}>
           <HashRow

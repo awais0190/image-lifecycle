@@ -19,6 +19,6 @@ export const config = {
   },
   app: {
     url: process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000',
-    maxDiscoveredImages: Number(process.env.NEXT_PUBLIC_MAX_DISCOVERED_IMAGES ?? '15'),
+    maxDiscoveredImages: Number(process.env.NEXT_PUBLIC_MAX_DISCOVERED_IMAGES ?? '25'),
   },
 } as const;

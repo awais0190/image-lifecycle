@@ -88,6 +88,16 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
           platform:        ((doc.sources as { platform?: string }[])?.[0]?.platform) ?? 'Unknown',
           downloadedAt:    new Date(doc.uploadedAt ?? Date.now()),
           downloadSuccess: true,
+          clipEmbedding:   (doc.clipEmbedding as number[] | undefined) ?? null,
+          dHash:           (doc as unknown as { dHash?: string }).dHash ?? '',
+          elaScore:               (doc.forensics as unknown as { elaScore?: number }).elaScore ?? 0,
+          elaHeatmapUrl:          (doc.forensics as unknown as { elaHeatmapUrl?: string }).elaHeatmapUrl ?? '',
+          isPartialOfRoot:        false,
+          partialMatchConfidence: 0,
+          partialMatchWhich:      null,
+          visualEditScore:        0,
+          visualEditReasons:      [],
+          clipEditProbability:    0,
         },
         depth:      doc.depth as unknown as number,
         parentHash: doc.parentHash as string | null,
@@ -105,6 +115,7 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
       totalDepth:       Math.max(0, ...[...nodes.values()].map((n) => n.depth)),
       confidenceScores: new Map(edges.map((e) => [e.childHash, e.confidence])),
       clipUsed:         false,
+      unrelated:        [],
     };
 
     const allNodes: ImageNode[] = allDocs.map((d) => d.toObject() as unknown as ImageNode);

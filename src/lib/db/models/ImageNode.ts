@@ -3,7 +3,7 @@
 //
 // Central document that represents one image in the provenance graph.
 // Each node knows its parent hash (null = root) and the hashes of its
-// children, forming a directed tree that React Flow will render in Phase 03.
+// children, forming a directed tree rendered in React Flow.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import mongoose, {
@@ -38,7 +38,7 @@ const MetadataSchema = new Schema(
   { _id: false }
 );
 
-// Phase 04: sub-document for a single edit signal
+// Sub-document for a single edit signal
 const EditSignalSchema = new Schema(
   {
     score:  { type: Number, required: true },
@@ -55,7 +55,6 @@ const ForensicsSchema = new Schema(
     elaScore:        { type: Number, required: true, default: 0 },
     elaHeatmapUrl:   { type: String },
     confidence:      { type: Number, required: true, default: 0 },
-    // Phase 04 additions
     editProbability: { type: Number, default: null },
     editVerdict:     { type: String, enum: ['original', 'edited', 'uncertain', null], default: null },
     signals: {
@@ -86,10 +85,11 @@ const SourceSchema = new Schema(
 
 export interface IImageNode extends Document {
   // Fingerprints
-  hash:              string;   // perceptual hash (pHash)
+  hash:              string;   // perceptual hash (pHash) — primary key, backwards compat
   cryptoHash:        string;   // SHA-256
+  dHash?:            string;   // difference hash
 
-  // Embedding (Phase 02)
+  // Embedding
   clipEmbedding:     number[];
 
   // Storage
@@ -137,7 +137,10 @@ const ImageNodeSchema = new Schema<IImageNode, IImageNodeModel>(
     clipEmbedding: {
       type:    [Number],
       default: [],
-      // Phase 02: populated by CLIP microservice
+    },
+    dHash: {
+      type:  String,
+      index: true,
     },
     cloudinaryUrl: {
       type:     String,
@@ -176,13 +179,13 @@ ImageNodeSchema.index({ cryptoHash: 1 });
 
 /**
  * Converts this MongoDB document to a React Flow-compatible TreeNode shape.
- * Phase 03: position (x, y) will be computed by the layout algorithm.
+ * Position (x, y) is computed by the Dagre layout algorithm.
  */
 ImageNodeSchema.methods.toTreeNode = function (this: IImageNode): TreeNode {
   return {
     id:       this.hash,
     type:     'imageNode',
-    position: { x: 0, y: 0 }, // TODO Phase 03: compute via Dagre / ELK layout
+    position: { x: 0, y: 0 }, // computed by Dagre layout
     data: {
       label:     this.cloudinaryPublicId,
       imageUrl:  this.cloudinaryUrl,
@@ -206,7 +209,7 @@ ImageNodeSchema.methods.toTreeNode = function (this: IImageNode): TreeNode {
  * Atomically find a document by pHash, or create it with provided defaults.
  * Used during the ingestion pipeline to avoid duplicate insertions.
  *
- * TODO Phase 02: hook this into the analysis route handler.
+ * Used during analysis to avoid duplicate insertions.
  */
 ImageNodeSchema.statics.findByHashOrCreate = async function (
   hash: string,

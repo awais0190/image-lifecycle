@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * ImageNodeCard — React Flow custom node component — Phase 04.
+ * ImageNodeCard — React Flow custom node component.
  * Adds an ELA score dot (red/amber/green) on the bottom-right of the card.
  */
 
@@ -45,12 +45,28 @@ function ElaDot({ elaScore }: { elaScore: number }) {
   );
 }
 
+/** Small row of emoji indicators for detected edit types */
+function EditTypeIcons({ editTypes }: { editTypes: string[] }) {
+  if (!editTypes.length) return null;
+  return (
+    <div style={{ display: 'flex', gap: 2, marginTop: 2 }}>
+      {editTypes.includes('color_change') && (
+        <span title="Color filter / colour change detected" style={{ fontSize: 9 }}>🎨</span>
+      )}
+      {editTypes.includes('object_change') && (
+        <span title="Objects added or removed" style={{ fontSize: 9 }}>🔍</span>
+      )}
+    </div>
+  );
+}
+
 function ImageNodeCardInner({ data, selected }: NodeProps & { data: ImageNodeData }) {
   const statusColor = STATUS_COLORS[data.status as NodeStatusValue] ?? '#8b949e';
   const platform    = data.sources?.[0]?.platform ?? 'Uploaded';
   const borderColor = selected ? statusColor : '#30363d';
   const glowShadow  = selected ? `0 0 0 2px ${statusColor}55, 0 4px 20px ${statusColor}33` : 'none';
   const elaScore    = data.forensics?.elaScore ?? 0;
+  const editTypes   = data.forensics?.editReport?.overall?.edit_types ?? [];
 
   return (
     <>
@@ -117,6 +133,7 @@ function ImageNodeCardInner({ data, selected }: NodeProps & { data: ImageNodeDat
           <p style={{ fontSize: 9, color: '#484f58', margin: '2px 0 0', fontFamily: 'monospace' }}>
             {data.hash.slice(0, 12)}…
           </p>
+          <EditTypeIcons editTypes={editTypes} />
         </div>
       </motion.div>
 

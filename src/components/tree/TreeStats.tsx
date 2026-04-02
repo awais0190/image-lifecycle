@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * TreeStats — Phase 03
+ * TreeStats
  * Pill-badge bar showing aggregate tree statistics.
  */
 

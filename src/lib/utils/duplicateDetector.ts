@@ -1,5 +1,5 @@
 /**
- * Duplicate detection utilities — Phase 04.
+ * Duplicate detection utilities.
  * Three-signal detection pipeline:
  *   1. cryptoHash exact match   → DUPLICATE (100% certain)
  *   2. pHash Hamming distance   → SIMILAR / UNCERTAIN
