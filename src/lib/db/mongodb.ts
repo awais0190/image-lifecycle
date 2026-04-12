@@ -1,27 +1,20 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// MongoDB — production-grade singleton connection for Next.js
+// MongoDB — singleton connection for Next.js
 //
-// Uses the global._mongoose cache pattern to survive hot-reloads in
-// development without opening a new connection on every module load.
+// Graceful: if MONGODB_URI is missing or the connection fails, connectDB()
+// returns null instead of throwing. Call sites must check the return value
+// before using the DB — the app continues to run without MongoDB.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import mongoose from 'mongoose';
 
-const MONGODB_URI = process.env.MONGODB_URI as string;
+const MONGODB_URI = process.env.MONGODB_URI as string | undefined;
 
-if (!MONGODB_URI) {
-  throw new Error(
-    'Please define the MONGODB_URI environment variable in .env.local'
-  );
-}
-
-/** Cache shape stored in the Node.js global object */
 interface MongooseCache {
-  conn: typeof mongoose | null;
+  conn:    typeof mongoose | null;
   promise: Promise<typeof mongoose> | null;
 }
 
-// Extend the global namespace so TypeScript doesn't complain
 declare global {
   // eslint-disable-next-line no-var
   var _mongoose: MongooseCache | undefined;
@@ -30,7 +23,7 @@ declare global {
 const cache: MongooseCache = global._mongoose ?? { conn: null, promise: null };
 global._mongoose = cache;
 
-/** Retry logic: attempt connection up to `maxAttempts` times with exp backoff */
+/** Attempt connection up to `maxAttempts` times with exponential backoff. */
 async function connectWithRetry(
   uri: string,
   maxAttempts = 3
@@ -40,65 +33,63 @@ async function connectWithRetry(
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       console.log(`[MongoDB] Connection attempt ${attempt}/${maxAttempts}…`);
-
-      const connection = await mongoose.connect(uri, {
-        bufferCommands: false,
-      });
-
+      const connection = await mongoose.connect(uri, { bufferCommands: false });
       console.log('[MongoDB] Connected successfully.');
       return connection;
     } catch (err) {
       lastError = err;
-      const delay = Math.pow(2, attempt) * 500; // 1s, 2s, 4s
-      console.warn(`[MongoDB] Attempt ${attempt} failed. Retrying in ${delay}ms…`, err);
-
+      const delay = Math.pow(2, attempt) * 500; // 1s → 2s → 4s
+      console.warn(`[MongoDB] Attempt ${attempt} failed. Retrying in ${delay}ms…`);
       if (attempt < maxAttempts) {
         await new Promise((resolve) => setTimeout(resolve, delay));
       }
     }
   }
 
-  console.error('[MongoDB] All connection attempts exhausted.');
   throw lastError;
 }
 
 /**
- * Returns a cached Mongoose connection.
- * Call this at the top of any API route handler or server action.
+ * Returns a cached Mongoose connection, or null if unavailable.
+ * NEVER throws — callers must check for null before using the DB.
  */
-export async function connectDB(): Promise<typeof mongoose> {
-  // Return existing connection immediately
-  if (cache.conn) {
-    return cache.conn;
+export async function connectDB(): Promise<typeof mongoose | null> {
+  if (!MONGODB_URI) {
+    console.warn('[MongoDB] MONGODB_URI is not set — running without database.');
+    return null;
   }
 
-  // Reuse an in-flight connection promise (avoids parallel connect races)
+  // Return existing live connection
+  if (cache.conn) return cache.conn;
+
+  // Reuse in-flight promise to avoid parallel connect races
   if (!cache.promise) {
     cache.promise = connectWithRetry(MONGODB_URI).then((conn) => {
-      // ── Connection event logging ─────────────────────────────
-      conn.connection.on('connected', () =>
-        console.log('[MongoDB] Event: connected')
-      );
-      conn.connection.on('disconnected', () =>
-        console.log('[MongoDB] Event: disconnected')
-      );
-      conn.connection.on('error', (err: Error) =>
-        console.error('[MongoDB] Connection error:', err)
-      );
-
+      conn.connection.on('disconnected', () => {
+        console.warn('[MongoDB] Disconnected — clearing cache.');
+        cache.conn    = null;
+        cache.promise = null;
+      });
+      conn.connection.on('error', (err: Error) => {
+        console.error('[MongoDB] Connection error:', err.message);
+      });
       return conn;
     });
   }
 
   try {
     cache.conn = await cache.promise;
+    return cache.conn;
   } catch (err) {
-    // Reset promise so next call can retry fresh
     cache.promise = null;
-    throw err;
+    console.error('[MongoDB] All connection attempts failed — running without database.', err);
+    return null;
   }
+}
 
-  return cache.conn;
+/** True if a live connection exists right now (synchronous, no await). */
+export function isDBConnected(): boolean {
+  return mongoose.connection.readyState === 1;
 }
 
 export default connectDB;

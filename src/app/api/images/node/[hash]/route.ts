@@ -27,7 +27,13 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
   }
 
   try {
-    await connectDB();
+    const db = await connectDB();
+    if (!db) {
+      return NextResponse.json(
+        { error: 'Database unavailable', code: 'DB_UNAVAILABLE' },
+        { status: 503 }
+      );
+    }
 
     const node = await ImageNodeModel.findOne({ hash: hash.trim() });
 
