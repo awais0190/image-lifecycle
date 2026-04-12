@@ -42,7 +42,7 @@ import { faceService }                         from '@/lib/services/faceService'
 import { reverseImageSearch }                  from '@/lib/services/googleVision';
 import { analyzeDiscoveredImages }             from '@/lib/services/batchAnalyzer';
 import { buildRelationships }                  from '@/lib/services/relationshipEngine';
-import { buildTreeJson, getTreeStats, singleNodeTree } from '@/lib/utils/treeBuilder';
+import { buildTreeJson, getTreeStats } from '@/lib/utils/treeBuilder';
 import { cosineSimilarity }                          from '@/lib/services/clipService';
 import type { IImageNode }                     from '@/lib/db/models/ImageNode';
 import type { AnalyzedImage }                  from '@/lib/services/batchAnalyzer';
@@ -102,23 +102,11 @@ export async function POST(request: NextRequest) {
     console.log('[Phase04] Step 4: Extracting EXIF…');
     const exifData = await extractExifData(buffer);
 
-    // ── Step 5: Exact duplicate check ─────────────────────────────────────
-    console.log('[Phase04] Step 5: Checking for exact duplicate…');
-    await connectDB();
-
-    const existingNode = await ImageNodeModel.findOne({ cryptoHash });
-    if (existingNode) {
-      console.log('[Phase04] Exact duplicate — returning cached node');
-      await ImageNodeModel.updateOne({ cryptoHash }, { $inc: { seenCount: 1 } }).catch(() => null);
-      const tree  = singleNodeTree(existingNode.toObject() as unknown as ImageNode);
-      const stats = getTreeStats(tree);
-      return NextResponse.json({
-        status: 'duplicate',
-        node:   existingNode.toObject(),
-        tree,   stats,
-        processingTime:  Date.now() - startTime,
-        discoveredCount: 0,
-      });
+    // ── Step 5: Connect DB (non-fatal — pipeline continues without DB) ───
+    console.log('[Phase04] Step 5: Connecting to DB…');
+    const db = await connectDB();
+    if (!db) {
+      console.warn('[Phase04] DB unavailable — analysis will run but results will NOT be persisted.');
     }
 
     // ── Step 6: pHash / CLIP similarity check ─────────────────────────────
@@ -158,10 +146,12 @@ export async function POST(request: NextRequest) {
     ) {
       parentHash = dupResult.matchedNode.hash;
       depth      = (dupResult.matchedNode.depth ?? 0) + 1;
-      await ImageNodeModel.updateOne(
-        { hash: parentHash },
-        { $addToSet: { children: pHash } }
-      ).catch(() => null);
+      if (db) {
+        await ImageNodeModel.updateOne(
+          { hash: parentHash },
+          { $addToSet: { children: pHash } }
+        ).catch(() => null);
+      }
     }
 
     // ── Step 9: Save root ImageNode ────────────────────────────────────────
@@ -207,7 +197,16 @@ export async function POST(request: NextRequest) {
       uploadedAt: new Date(),
     } as unknown as IImageNode;
 
-    const rootMongoNode = await ImageNodeModel.create(nodeData);
+    const rootMongoNode: IImageNode = db
+      ? (await ImageNodeModel.findOneAndUpdate(
+          { hash: pHash },
+          { $set: nodeData },
+          { upsert: true, new: true }
+        ).catch((err) => {
+          console.warn('[Phase04] Step 9: DB save failed (continuing):', (err as Error).message);
+          return null;
+        }) ?? nodeData) as IImageNode
+      : nodeData as unknown as IImageNode;
 
     // ── Steps 10–15: Vision + relationship pipeline ────────────────────────
     const rootAnalyzed: AnalyzedImage = {
@@ -263,6 +262,7 @@ export async function POST(request: NextRequest) {
     const discoveredMongoNodes: IImageNode[] = [];
 
     for (const img of analyzedImages) {
+      if (!db) break; // skip DB writes when unavailable
       try {
         const existing = await ImageNodeModel.findOne({ cryptoHash: img.cryptoHash });
         if (existing) {
@@ -372,7 +372,7 @@ export async function POST(request: NextRequest) {
     const graph = buildRelationships(rootAnalyzed, analyzedImages, clipMap);
 
     // ── Step 14: Persist edges via bulkWrite ──────────────────────────────
-    if (graph.edges.length > 0) {
+    if (db && graph.edges.length > 0) {
       console.log(`[Phase04] Step 14: Persisting ${graph.edges.length} edges…`);
       const bulkOps: Parameters<typeof ImageNodeModel.bulkWrite>[0] = [];
 
@@ -410,12 +410,17 @@ export async function POST(request: NextRequest) {
       `[Phase04] ── Complete in ${processingTime}ms | nodes: ${stats.totalNodes} | ELA: ${elaResult.elaScore.toFixed(3)} | CLIP: ${clipServiceAvailable} ──`
     );
 
+    const rootNodeObj = typeof rootMongoNode.toObject === 'function'
+      ? rootMongoNode.toObject()
+      : rootMongoNode;
+
     return NextResponse.json({
       status:             'success',
-      node:               rootMongoNode.toObject(),
+      node:               rootNodeObj,
       tree,               stats,
       processingTime,
       discoveredCount:    analyzedImages.length,
+      dbAvailable:        !!db,
       visionSearchFailed,
       visionError:        visionSearchFailed ? visionErrorMessage : undefined,
       unrelatedImages:    graph.unrelated.map((img) => ({

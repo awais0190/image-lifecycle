@@ -36,8 +36,8 @@ import type { NodeStatusValue }    from '@/lib/utils/constants';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const NODE_W = 180;
-const NODE_H = 115;
+const NODE_W = 300;
+const NODE_H = 520;
 
 // ─── dagre layout ─────────────────────────────────────────────────────────────
 
@@ -45,7 +45,7 @@ function getLayoutedElements(nodes: RFNode[], edges: RFEdge[]): { nodes: RFNode[
   if (nodes.length === 0) return { nodes, edges };
 
   const g = new dagre.graphlib.Graph();
-  g.setGraph({ rankdir: 'TB', ranksep: 80, nodesep: 60 });
+  g.setGraph({ rankdir: 'TB', ranksep: 100, nodesep: 80 });
   g.setDefaultEdgeLabel(() => ({}));
 
   nodes.forEach((n) => g.setNode(n.id, { width: NODE_W, height: NODE_H }));
@@ -129,6 +129,8 @@ function convertTreeToFlow(
       id:       node.hash,
       type:     'imageNode',
       position: { x: 0, y: 0 },
+      width:    NODE_W,
+      height:   NODE_H,
       data:     { ...(node as unknown as Record<string, unknown>), selected: node.hash === selectedNodeHash },
     });
     for (const child of node.children) {

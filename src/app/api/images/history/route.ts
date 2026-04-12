@@ -24,7 +24,13 @@ export async function GET(request: NextRequest) {
   const skip  = (page - 1) * limit;
 
   try {
-    await connectDB();
+    const db = await connectDB();
+    if (!db) {
+      return NextResponse.json(
+        { error: 'Database unavailable', code: 'DB_UNAVAILABLE', nodes: [], total: 0, totalPages: 0, page, limit },
+        { status: 503 }
+      );
+    }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const filter: Record<string, any> = {};
